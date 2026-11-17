@@ -83,13 +83,16 @@ def quality_problem(gray: np.ndarray, cfg: dict) -> Optional[str]:
     Memeriksa tingkat kecerahan dan ketajaman gambar.
     Kembalikan 'gelap', 'buram', atau None jika lolos.
     """
+    min_bright = float(cfg.get('min_brightness', 45.0))
+    min_sharp = float(cfg.get('min_sharpness', 20.0))
+
     mean_brightness = float(gray.mean())
-    if mean_brightness < cfg.get('min_brightness', 70.0):
+    if mean_brightness < min_bright:
         return 'gelap'
 
     # Variansi Laplacian untuk mendeteksi blur
     laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    if laplacian_var < cfg.get('min_sharpness', 60.0):
+    if laplacian_var < min_sharp:
         return 'buram'
 
     return None

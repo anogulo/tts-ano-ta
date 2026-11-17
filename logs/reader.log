@@ -779,3 +779,258 @@
 2026-11-18 00:19:39,405 [INFO] [Mock Shutdown] Perangkat dimatikan.
 2026-11-18 00:19:39,405 [INFO] Perangkat diinisialisasi. Memutar status: siap.
 2026-11-18 00:19:39,406 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 00:36:34,036 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 00:36:34,050 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 00:36:34,563 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:34,565 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:34,565 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 00:36:34,566 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:34,572 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-18 00:36:35,085 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-18 00:36:35,599 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-18 00:36:36,100 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 00:36:36,102 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:36,114 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-18 00:36:36,645 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-18 00:36:37,159 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-18 00:36:37,664 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 00:36:37,665 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,695 [INFO] OCR selesai dalam 0.01 detik, karakter terdeteksi: 0
+2026-11-18 00:36:37,695 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 00:36:37,705 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,742 [INFO] OCR selesai dalam 0.03 detik, karakter terdeteksi: 54
+2026-11-18 00:36:37,742 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 00:36:37,743 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,743 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 00:36:37,745 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,746 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 00:36:37,747 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 00:36:37,747 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,747 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 00:36:37,748 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,748 [INFO] Mengatur volume ke 100%
+2026-11-18 00:36:37,749 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,749 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 00:36:37,750 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 00:36:37,751 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 01:25:26,544 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 01:25:26,561 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 01:25:27,260 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:27,262 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:27,262 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 01:25:27,263 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:27,274 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-18 01:25:27,783 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-18 01:25:28,295 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-18 01:25:28,796 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 01:25:28,797 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:28,813 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-18 01:25:29,321 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-18 01:25:29,840 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-18 01:25:30,341 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 01:25:30,342 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,380 [INFO] OCR selesai dalam 0.03 detik, karakter terdeteksi: 0
+2026-11-18 01:25:30,380 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 01:25:30,381 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,418 [INFO] OCR selesai dalam 0.03 detik, karakter terdeteksi: 54
+2026-11-18 01:25:30,418 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 01:25:30,420 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,420 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 01:25:30,423 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,424 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 01:25:30,424 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 01:25:30,424 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,425 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 01:25:30,425 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,426 [INFO] Mengatur volume ke 100%
+2026-11-18 01:25:30,426 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,427 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 01:25:30,427 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:25:30,428 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 01:41:56,288 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 01:41:56,291 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 01:41:56,764 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:56,765 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:56,765 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 01:41:56,766 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:56,772 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-18 01:41:57,282 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-18 01:41:57,797 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-18 01:41:58,298 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 01:41:58,300 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:58,311 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-18 01:41:58,827 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-18 01:41:59,345 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-18 01:41:59,849 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 01:41:59,850 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,905 [INFO] OCR selesai dalam 0.03 detik, karakter terdeteksi: 0
+2026-11-18 01:41:59,905 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 01:41:59,906 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,970 [INFO] OCR selesai dalam 0.06 detik, karakter terdeteksi: 54
+2026-11-18 01:41:59,970 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 01:41:59,971 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,973 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 01:41:59,977 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,977 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 01:41:59,979 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 01:41:59,980 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,981 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 01:41:59,981 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,983 [INFO] Mengatur volume ke 100%
+2026-11-18 01:41:59,983 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,985 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 01:41:59,987 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:41:59,987 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 01:46:09,592 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 01:46:09,596 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 01:46:10,086 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:10,087 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:10,087 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 01:46:10,088 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:10,098 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-18 01:46:10,610 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-18 01:46:11,124 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-18 01:46:11,625 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 01:46:11,627 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:11,642 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-18 01:46:12,156 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-18 01:46:12,671 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-18 01:46:13,177 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 01:46:13,178 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,206 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 0
+2026-11-18 01:46:13,206 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 01:46:13,218 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,254 [INFO] OCR selesai dalam 0.03 detik, karakter terdeteksi: 54
+2026-11-18 01:46:13,257 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 01:46:13,258 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,259 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 01:46:13,260 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,261 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 01:46:13,261 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 01:46:13,262 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,262 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 01:46:13,263 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,263 [INFO] Mengatur volume ke 100%
+2026-11-18 01:46:13,264 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,265 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 01:46:13,265 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 01:46:13,266 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 02:02:42,770 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 02:02:42,772 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 02:02:43,273 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:43,275 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:43,275 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 02:02:43,276 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:43,284 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-18 02:02:43,794 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-18 02:02:44,308 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-18 02:02:44,810 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 02:02:44,812 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:44,823 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-18 02:02:45,336 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-18 02:02:45,852 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-18 02:02:46,354 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 02:02:46,355 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,383 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 0
+2026-11-18 02:02:46,383 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 02:02:46,397 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,430 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 54
+2026-11-18 02:02:46,430 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 02:02:46,435 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,436 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 02:02:46,437 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,437 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 02:02:46,438 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 02:02:46,438 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,438 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 02:02:46,440 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,440 [INFO] Mengatur volume ke 100%
+2026-11-18 02:02:46,440 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,442 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 02:02:46,443 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:02:46,443 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 02:56:28,998 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 02:56:29,010 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 02:56:29,573 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:29,574 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:29,574 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 02:56:29,576 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:29,585 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-18 02:56:30,095 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-18 02:56:30,603 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-18 02:56:31,104 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 02:56:31,105 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:31,116 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-18 02:56:31,627 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-18 02:56:32,178 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-18 02:56:32,679 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-18 02:56:32,680 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,711 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 0
+2026-11-18 02:56:32,711 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 02:56:32,712 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,742 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 54
+2026-11-18 02:56:32,742 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 02:56:32,743 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,744 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 02:56:32,745 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,746 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 02:56:32,746 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 02:56:32,746 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,747 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 02:56:32,747 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,747 [INFO] Mengatur volume ke 100%
+2026-11-18 02:56:32,748 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,748 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 02:56:32,749 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 02:56:32,749 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:11:37,268 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 03:11:37,280 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-18 03:11:37,837 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:37,838 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:37,838 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-18 03:11:37,839 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:37,847 [WARNING] Quality check gagal (percobaan 1/2): gelap
+2026-11-18 03:11:38,359 [WARNING] Quality check gagal (percobaan 2/2): gelap
+2026-11-18 03:11:38,359 [WARNING] Batas percobaan tercapai (gelap). Mengaktifkan filter penajam citra dan tetap melanjutkan OCR...
+2026-11-18 03:11:40,500 [INFO] OCR selesai dalam 2.67 detik, karakter terdeteksi: 0
+2026-11-18 03:11:40,500 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 03:11:40,509 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:40,518 [WARNING] Quality check gagal (percobaan 1/2): buram
+2026-11-18 03:11:41,029 [WARNING] Quality check gagal (percobaan 2/2): buram
+2026-11-18 03:11:41,029 [WARNING] Batas percobaan tercapai (buram). Mengaktifkan filter penajam citra dan tetap melanjutkan OCR...
+2026-11-18 03:11:41,680 [INFO] OCR selesai dalam 1.17 detik, karakter terdeteksi: 0
+2026-11-18 03:11:41,680 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 03:11:41,686 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,717 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 0
+2026-11-18 03:11:41,717 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-18 03:11:41,718 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,743 [INFO] OCR selesai dalam 0.02 detik, karakter terdeteksi: 54
+2026-11-18 03:11:41,743 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 03:11:41,749 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,749 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-18 03:11:41,750 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,751 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-18 03:11:41,751 [INFO] Pembacaan selesai seluruhnya.
+2026-11-18 03:11:41,751 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,751 [INFO] Belum ada bacaan untuk diulang.
+2026-11-18 03:11:41,752 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,753 [INFO] Mengatur volume ke 100%
+2026-11-18 03:11:41,753 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,754 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-18 03:11:41,755 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:11:41,755 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:25:48,864 [INFO] === Menjalankan Pembaca Tunanetra (Reader Service) ===
+2026-11-18 03:25:53,136 [INFO] Kamera aktif pada device 0 (Target Resolusi: 1920x1080)
+2026-11-18 03:25:53,137 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-18 03:26:05,809 [INFO] Kamera aktif pada device 1 (Target Resolusi: 1920x1080)
+2026-11-18 03:26:05,813 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-18 03:26:37,827 [INFO] OCR selesai dalam 4.49 detik, karakter terdeteksi: 1087
+2026-11-18 03:26:39,891 [INFO] TIME_TO_FIRST_AUDIO: 6.55 detik
+2026-11-18 03:26:54,095 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:55,585 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:55,787 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:56,003 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:56,205 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:56,405 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:56,593 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-18 03:26:56,819 [INFO] Permintaan diabaikan: sistem sedang sibuk.

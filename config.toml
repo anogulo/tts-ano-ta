@@ -1,13 +1,13 @@
 [camera]
-device = 0
+device = 1
 width = 1920
 height = 1080
 settle_frames = 8        # frame dibuang agar autofocus dan eksposur stabil
 
 [quality]
-min_sharpness = 50.0     # variansi Laplacian pada grayscale
-min_brightness = 55.0    # rata-rata grayscale, skala 0–255
-max_retries = 2
+min_sharpness = 20.0     # ambang batas variansi Laplacian (diturunkan agar tidak false-alarm buram)
+min_brightness = 40.0    # ambang batas rata-rata grayscale (skala 0–255)
+max_retries = 1
 
 [ocr]
 lang = "ind+eng"

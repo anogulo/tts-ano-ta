@@ -455,11 +455,14 @@ class App:
                 break
 
             log.warning("Quality check gagal (percobaan %d/%d): %s", attempt + 1, max_retries + 1, problem)
-            self.cue(f'gambar_{problem}', wait=True)
-            time.sleep(0.5)
+            if attempt < max_retries:
+                self.cue(f'gambar_{problem}', wait=True)
+                time.sleep(0.5)
+            else:
+                log.warning("Batas percobaan tercapai (%s). Mengaktifkan filter penajam citra dan tetap melanjutkan OCR...", problem)
+                break
         else:
-            log.warning("Semua percobaan quality check gagal. Proses dihentikan.")
-            return
+            log.warning("Semua percobaan quality check selesai. Melanjutkan ke OCR.")
 
         # Preprocessing & OCR
         self.cue('memproses')
