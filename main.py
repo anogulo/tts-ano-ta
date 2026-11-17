@@ -331,10 +331,17 @@ class App:
 
         # Atur ALSA mixer jika di Linux
         if platform.system() == "Linux":
-            mixer = cfg['audio'].get('mixer', 'PCM')
+            mixer = cfg['audio'].get('mixer', 'Headphone')
+            dev_str = cfg['audio'].get('device', 'plughw:2,0')
+            card_num = '2'
+            if ':' in dev_str and ',' in dev_str:
+                try:
+                    card_num = dev_str.split(':')[1].split(',')[0]
+                except Exception:
+                    card_num = '2'
             try:
                 subprocess.run(
-                    ['amixer', '-c', '1', 'sset', mixer, f"{new_vol}%"],
+                    ['amixer', '-c', card_num, 'sset', mixer, f"{new_vol}%"],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
