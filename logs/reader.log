@@ -643,3 +643,37 @@
 2026-11-17 17:09:50,455 [INFO] [Mock Shutdown] Perangkat dimatikan.
 2026-11-17 17:09:50,456 [INFO] Perangkat diinisialisasi. Memutar status: siap.
 2026-11-17 17:09:50,457 [INFO] Permintaan diabaikan: sistem sedang sibuk.
+2026-11-17 18:01:08,598 [INFO] Konfigurasi camera.device diperbarui ke 1 di config.toml
+2026-11-17 18:01:08,610 [INFO] Konfigurasi camera.device diperbarui ke 0 di config.toml
+2026-11-17 18:01:09,293 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:09,294 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:09,295 [ERROR] Kamera tidak terbaca atau frame kosong.
+2026-11-17 18:01:09,295 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:09,301 [WARNING] Quality check gagal (percobaan 1/3): gelap
+2026-11-17 18:01:09,805 [WARNING] Quality check gagal (percobaan 2/3): gelap
+2026-11-17 18:01:10,321 [WARNING] Quality check gagal (percobaan 3/3): gelap
+2026-11-17 18:01:10,822 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-17 18:01:10,823 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:10,824 [WARNING] Quality check gagal (percobaan 1/3): buram
+2026-11-17 18:01:11,341 [WARNING] Quality check gagal (percobaan 2/3): buram
+2026-11-17 18:01:11,848 [WARNING] Quality check gagal (percobaan 3/3): buram
+2026-11-17 18:01:12,352 [WARNING] Semua percobaan quality check gagal. Proses dihentikan.
+2026-11-17 18:01:12,354 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,417 [INFO] OCR selesai dalam 0.05 detik, karakter terdeteksi: 0
+2026-11-17 18:01:12,417 [INFO] Teks tidak terdeteksi (panjang < 3 karakter).
+2026-11-17 18:01:12,421 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,452 [INFO] OCR selesai dalam 0.03 detik, karakter terdeteksi: 54
+2026-11-17 18:01:12,452 [INFO] Pembacaan selesai seluruhnya.
+2026-11-17 18:01:12,454 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,454 [INFO] Tombol utama ditekan saat bicara -> stop pemutaran.
+2026-11-17 18:01:12,455 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,455 [INFO] Memutar ulang 1 kalimat bacaan terakhir.
+2026-11-17 18:01:12,455 [INFO] Pembacaan selesai seluruhnya.
+2026-11-17 18:01:12,455 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,456 [INFO] Belum ada bacaan untuk diulang.
+2026-11-17 18:01:12,456 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,456 [INFO] Mengatur volume ke 100%
+2026-11-17 18:01:12,457 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,458 [INFO] [Mock Shutdown] Perangkat dimatikan.
+2026-11-17 18:01:12,458 [INFO] Perangkat diinisialisasi. Memutar status: siap.
+2026-11-17 18:01:12,458 [INFO] Permintaan diabaikan: sistem sedang sibuk.

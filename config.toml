@@ -31,3 +31,9 @@ led = 22
 
 [safety]
 max_temp_c = 75.0
+
+[gui]
+enabled = false          # Ubah ke true jika ingin otomatis membuka layar sentuh TFT
+width = 320             # Resolusi LCD RHOS 24 TFT SPI (Landscape)
+height = 240
+fullscreen = false      # Set true untuk fullscreen di LCD SPI Raspberry Pi (/dev/fb1)

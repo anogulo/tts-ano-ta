@@ -20,10 +20,16 @@ sudo apt install -y \
     python3-opencv \
     python3-gpiozero \
     python3-numpy \
+    python3-pygame \
+    python3-tk \
+    python3-pil \
     python3-pip \
     python3-venv \
     alsa-utils \
     v4l-utils \
+    evtest \
+    tslib \
+    libts-bin \
     git
 
 # 2. Tambahkan user ke grup hardware (audio, video, gpio)

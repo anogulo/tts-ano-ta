@@ -37,6 +37,7 @@ from terminal_view import (
     show_opencv_window,
     stream_terminal_camera
 )
+from tft_gui import launch_gui
 
 # Muat konfigurasi toml
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.toml')
@@ -561,7 +562,16 @@ if __name__ == '__main__':
     w_thread = threading.Thread(target=watchdog_loop, args=(app,), daemon=True)
     w_thread.start()
 
-    if HAS_GPIO:
+    # Cek apakah mode GUI aktif dari argumen CLI (--gui) atau dari config.toml
+    use_gui = ('--gui' in sys.argv) or bool(cfg.get('gui', {}).get('enabled', False))
+    gui_w = int(cfg.get('gui', {}).get('width', 320))
+    gui_h = int(cfg.get('gui', {}).get('height', 240))
+    gui_fs = bool(cfg.get('gui', {}).get('fullscreen', False))
+
+    if use_gui:
+        print(f"\n[Reader Service] Membuka Antarmuka GUI TFT 2.4\" ({gui_w}x{gui_h})...")
+        launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs)
+    elif HAS_GPIO:
         print("[Reader Service] Mode Raspberry Pi Aktif. Menunggu tombol GPIO...")
         try:
             from signal import pause
@@ -575,6 +585,7 @@ if __name__ == '__main__':
         print(" =" * 65)
         print(" Kontrol Keyboard:")
         print("  [Enter]  : Ambil gambar kamera & baca teks (Auto Tampil di Terminal)")
+        print("  [G]      : Buka Layar GUI Touchscreen TFT 2.4\" (Visual Modern)")
         print("  [K]      : Pilih / Ganti Kamera Hardware yang Terhubung")
         print("  [P]      : Pratinjau Live Video Kamera di Teks Terminal")
         print("  [W]      : Pratinjau Jendela Pop-up Kamera (OpenCV Window + Ambil Foto Uji)")
@@ -588,10 +599,13 @@ if __name__ == '__main__':
         import glob
         try:
             while True:
-                cmd = input("Perintah [Enter=Foto & Baca, K=Pilih Kamera, P=Terminal, W=Jendela, T=Test, Q=Keluar]: ").strip().lower()
+                cmd = input("Perintah [Enter=Foto & Baca, G=GUI, K=Kamera, P=Terminal, W=Jendela, T=Test, Q=Keluar]: ").strip().lower()
                 if cmd == 'q':
                     print("Keluar...")
                     break
+                elif cmd == 'g':
+                    # Buka antarmuka GUI TFT touchscreen
+                    launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs)
                 elif cmd in ('k', 'c'):
                     # Menu pilih kamera yang terhubung
                     app.select_camera()
