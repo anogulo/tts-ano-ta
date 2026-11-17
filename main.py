@@ -567,10 +567,11 @@ if __name__ == '__main__':
     gui_w = int(cfg.get('gui', {}).get('width', 320))
     gui_h = int(cfg.get('gui', {}).get('height', 240))
     gui_fs = bool(cfg.get('gui', {}).get('fullscreen', False))
+    gui_fb = str(cfg.get('gui', {}).get('fb_device', '/dev/fb0'))
 
     if use_gui:
-        print(f"\n[Reader Service] Membuka Antarmuka GUI TFT 2.4\" ({gui_w}x{gui_h})...")
-        launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs)
+        print(f"\n[Reader Service] Membuka Antarmuka GUI TFT 2.4\" ({gui_w}x{gui_h}) di {gui_fb}...")
+        launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
     elif HAS_GPIO:
         print("[Reader Service] Mode Raspberry Pi Aktif. Menunggu tombol GPIO...")
         try:

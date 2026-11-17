@@ -36,4 +36,6 @@ max_temp_c = 75.0
 enabled = false          # Ubah ke true jika ingin otomatis membuka layar sentuh TFT
 width = 320             # Resolusi LCD RHOS 24 TFT SPI (Landscape)
 height = 240
-fullscreen = false      # Set true untuk fullscreen di LCD SPI Raspberry Pi (/dev/fb1)
+fullscreen = false      # Set true untuk fullscreen di LCD SPI Raspberry Pi
+fb_device = "/dev/fb0"  # Target framebuffer LCD (/dev/fb0 atau /dev/fb1)
+video_driver = "fbcon"  # Driver video Pygame/SDL (fbcon | dummy)

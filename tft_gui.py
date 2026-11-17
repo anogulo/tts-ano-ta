@@ -15,7 +15,7 @@ import time
 import threading
 from typing import Optional, Tuple
 
-# Pastikan XDG_RUNTIME_DIR terkonfigurasi di Linux sebelum pygame/SDL dimuat
+# Pastikan konfigurasi lingkungan SDL / Linux Framebuffer siap sebelum pygame dimuat
 if sys.platform.startswith("linux"):
     if "XDG_RUNTIME_DIR" not in os.environ:
         try:
@@ -27,6 +27,14 @@ if sys.platform.startswith("linux"):
             os.environ["XDG_RUNTIME_DIR"] = runtime_dir
         except Exception:
             pass
+
+    # Konfigurasi default SDL Framebuffer untuk LCD SPI Raspberry Pi
+    os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
+    os.environ.setdefault("SDL_FBDEV", "/dev/fb0")
+    os.environ.setdefault("SDL_MOUSEDRV", "dummy")
+    os.environ.setdefault("SDL_MOUSEDEV", "/dev/null")
+    if "DISPLAY" not in os.environ:
+        os.environ["DISPLAY"] = ""
 
 import cv2
 import numpy as np
@@ -197,11 +205,12 @@ class TFTGuiPygame:
     Sangat responsif dan memiliki latensi sentuhan nol.
     """
 
-    def __init__(self, app_instance, width: int = 320, height: int = 240, fullscreen: bool = False):
+    def __init__(self, app_instance, width: int = 320, height: int = 240, fullscreen: bool = False, fb_device: str = "/dev/fb0"):
         self.app = app_instance
         self.width = width
         self.height = height
         self.fullscreen = fullscreen
+        self.fb_device = fb_device
         self.running = False
         self.clock = None
         self.screen = None
@@ -307,9 +316,13 @@ class TFTGuiPygame:
         pygame.display.set_caption("Pembaca Tunanetra - 2.4 TFT")
         self.clock = pygame.time.Clock()
 
-        # Inisialisasi Direct Framebuffer Blitter & Touch Reader jika /dev/fb1 tersedia
-        if os.path.exists("/dev/fb1"):
-            self.fb_blitter = FramebufferBlitter(device="/dev/fb1", width=self.width, height=self.height)
+        # Inisialisasi Direct Framebuffer Blitter & Touch Reader
+        target_fb = self.fb_device or os.environ.get("SDL_FBDEV", "/dev/fb0")
+        if not os.path.exists(target_fb) and os.path.exists("/dev/fb1"):
+            target_fb = "/dev/fb1"
+
+        if os.path.exists(target_fb):
+            self.fb_blitter = FramebufferBlitter(device=target_fb, width=self.width, height=self.height)
             self.touch_reader = LinuxTouchReader(width=self.width, height=self.height)
             self.touch_reader.start()
 
@@ -655,10 +668,10 @@ class TFTGuiTkinter:
         self.root.mainloop()
 
 
-def launch_gui(app_instance, width: int = 320, height: int = 240, fullscreen: bool = False):
+def launch_gui(app_instance, width: int = 320, height: int = 240, fullscreen: bool = False, fb_device: str = "/dev/fb0"):
     """Fungsi peluncur GUI utama dengan pemilihan engine cerdas (Pygame utama, Tkinter cadangan)."""
     if HAS_PYGAME:
-        gui = TFTGuiPygame(app_instance, width=width, height=height, fullscreen=fullscreen)
+        gui = TFTGuiPygame(app_instance, width=width, height=height, fullscreen=fullscreen, fb_device=fb_device)
         gui.run()
     elif HAS_TKINTER:
         print("[GUI] Pygame belum terpasang, beralih ke engine Tkinter...")
