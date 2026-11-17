@@ -41,3 +41,5 @@ capture_*.jpg
 Thumbs.db
 .vscode/
 .idea/
+logs/
+*.log
