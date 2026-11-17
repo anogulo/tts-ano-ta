@@ -595,8 +595,9 @@ if __name__ == '__main__':
     if use_gui:
         print(f"\n[Reader Service] Membuka Antarmuka GUI TFT 2.4\" ({gui_w}x{gui_h}) di {gui_fb}...")
         launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
-    elif HAS_GPIO:
-        print("[Reader Service] Mode Raspberry Pi Aktif. Menunggu tombol GPIO...")
+    elif not sys.stdin.isatty() and HAS_GPIO:
+        # Berjalan sebagai background service tanpa terminal interaktif (misal systemd)
+        print("[Reader Service] Mode Background Systemd Aktif. Menunggu tombol GPIO...")
         try:
             from signal import pause
             pause()
@@ -604,20 +605,23 @@ if __name__ == '__main__':
             log.info("Layanan dimatikan.")
             print("\nLayanan berhenti.")
     else:
+        # Berjalan dari terminal interaktif (SSH / Konsol / Terminal Raspi / PC)
         print("\n" + "=" * 65)
-        print(" [Reader Service] Mode Desktop / PC Aktif (Simulasi Tombol)")
+        print(" [Reader Service] Mode Interaktif Terminal Aktif")
         print(" =" * 65)
-        print(" Kontrol Keyboard:")
+        print(" Kontrol Terminal:")
         print("  [Enter]  : Ambil gambar kamera & baca teks (Auto Tampil di Terminal)")
         print("  [G]      : Buka Layar GUI Touchscreen TFT 2.4\" (Visual Modern)")
         print("  [K]      : Pilih / Ganti Kamera Hardware yang Terhubung")
         print("  [P]      : Pratinjau Live Video Kamera di Teks Terminal")
         print("  [W]      : Pratinjau Jendela Pop-up Kamera (OpenCV Window + Ambil Foto Uji)")
         print("  [T]      : Uji baca gambar contoh dari dataset/ (Mode Tanpa Kamera)")
-        print("  [R]      : Replay bacaan terakhir (Tahan Tombol Utama)")
+        print("  [R]      : Replay bacaan terakhir")
         print("  [S]      : Stop pemutaran audio seketika")
-        print("  [V]      : Ubah volume siklis (Tombol Bantu)")
+        print("  [V]      : Ubah volume siklis")
         print("  [Q]      : Keluar dari program")
+        if HAS_GPIO:
+            print(" *(Info: Tombol fisik GPIO & Layar TFT juga tetap aktif di background)*")
         print(" =" * 65 + "\n")
 
         import glob
@@ -629,7 +633,7 @@ if __name__ == '__main__':
                     break
                 elif cmd == 'g':
                     # Buka antarmuka GUI TFT touchscreen
-                    launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs)
+                    launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
                 elif cmd in ('k', 'c'):
                     # Menu pilih kamera yang terhubung
                     app.select_camera()
