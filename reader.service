@@ -1,0 +1,15 @@
+[Unit]
+Description=Pembaca Tunanetra (Image to Voice)
+After=multi-user.target sound.target
+
+[Service]
+User=pi
+SupplementaryGroups=audio video gpio
+WorkingDirectory=/home/pi/reader
+Environment=OMP_THREAD_LIMIT=1
+ExecStart=/home/pi/reader/.venv/bin/python main.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+TOKO BUKU CAHAYA ILMU
+Jl. Malioboro No. 12 Yogyakarta
+Struk Pembelian No. 89211
+1. Buku Panduan Python Rp. 85.000
+2. Buku Algoritma Dasar Rp. 95.000
+Total Pembayaran: Rp. 180.000
+Tunai: Rp. 200.000
+Kembalian: Rp. 20.000
+Terima kasih atas kunjungan Anda.

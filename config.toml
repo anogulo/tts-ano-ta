@@ -1,0 +1,33 @@
+[camera]
+device = 0
+width = 1920
+height = 1080
+settle_frames = 8        # frame dibuang agar autofocus dan eksposur stabil
+
+[quality]
+min_sharpness = 50.0     # variansi Laplacian pada grayscale
+min_brightness = 55.0    # rata-rata grayscale, skala 0–255
+max_retries = 2
+
+[ocr]
+lang = "ind+eng"
+psm = 6                  # fallback ke 3 dan 11 jika teks sedikit
+mode = "camera"          # camera | gray | otsu | adaptive
+min_conf = 45            # kata dengan confidence di bawah ini dibuang
+tessdata_dir = ""        # biarkan kosong jika menggunakan default sistem
+
+[tts]
+model = "models/id_ID-news_tts-medium.onnx"
+
+[audio]
+device = "plughw:1,0"    # cek dengan `aplay -l`
+mixer = "PCM"            # cek dengan `amixer -c 1 scontrols`
+volume_steps = [40, 60, 80, 100]
+
+[gpio]
+btn_main = 17
+btn_aux = 27
+led = 22
+
+[safety]
+max_temp_c = 75.0

@@ -1,0 +1,7 @@
+UJIAN TENGAH SEMESTER TAHUN AKADEMIK 2026
+Mata Kuliah: Pemrosesan Sinyal Digital
+Waktu Ujian: 90 Menit
+Sifat Ujian: Buku Terbuka
+Petunjuk: Jawablah seluruh pertanyaan dengan singkat dan jelas.
+Soal 1. Jelaskan prinsip dasar Discrete Fourier Transform.
+Soal 2. Hitung respons frekuensi dari filter digital berikut.

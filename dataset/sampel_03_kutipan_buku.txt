@@ -1,0 +1,7 @@
+BAB 1 PENDAHULUAN
+Perkembangan teknologi computer vision dan kecerdasan buatan
+telah membuka peluang besar dalam menciptakan perangkat asistif.
+Penyandang tunanetra kini dapat membaca dokumen cetak
+secara mandiri tanpa perlu bergantung pada bantuan visual orang lain.
+Implementasi sistem offline pada perangkat tertanam memastikan
+keamanan data serta keandalan penggunaan di segala situasi.
