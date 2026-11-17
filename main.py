@@ -4,6 +4,8 @@ Bagian dari Rancang Bangun Alat Bantu Baca Tunanetra (Image to Voice)
 Sesuai PRD Bagian 5 (FR-01, FR-10, FR-11, FR-12), Bagian 14, 15, dan 18.
 """
 
+import sys
+import shutil
 import logging
 import os
 import platform
