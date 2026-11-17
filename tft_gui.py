@@ -15,6 +15,19 @@ import time
 import threading
 from typing import Optional, Tuple
 
+# Pastikan XDG_RUNTIME_DIR terkonfigurasi di Linux sebelum pygame/SDL dimuat
+if sys.platform.startswith("linux"):
+    if "XDG_RUNTIME_DIR" not in os.environ:
+        try:
+            uid = os.getuid() if hasattr(os, "getuid") else 1000
+            runtime_dir = f"/run/user/{uid}"
+            if not os.path.exists(runtime_dir):
+                runtime_dir = f"/tmp/runtime-{uid}"
+                os.makedirs(runtime_dir, exist_ok=True, mode=0o700)
+            os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+        except Exception:
+            pass
+
 import cv2
 import numpy as np
 
@@ -24,6 +37,13 @@ try:
     HAS_PYGAME = True
 except ImportError:
     HAS_PYGAME = False
+
+# Cek pustaka pembaca input sentuh hardware Linux
+try:
+    import evdev
+    HAS_EVDEV = True
+except ImportError:
+    HAS_EVDEV = False
 
 # Class Rect helper agar tombol sentuh dapat didefinisikan tanpa ketergantungan Pygame
 class SimpleRect:
@@ -36,6 +56,131 @@ class SimpleRect:
     def collidepoint(self, pt):
         px, py = pt
         return self.x <= px <= self.x + self.width and self.y <= py <= self.y + self.height
+
+
+class FramebufferBlitter:
+    """
+    Menulis buffer frame Pygame secara langsung ke perangkat Linux Framebuffer
+    seperti /dev/fb1 (LCD 2.4" SPI ILI9341).
+    Mengonversi RGB888 ke 16-bit RGB565 dalam waktu < 1 ms menggunakan NumPy.
+    """
+    def __init__(self, device: str = "/dev/fb1", width: int = 320, height: int = 240):
+        self.device = device
+        self.width = width
+        self.height = height
+        self.fb_file = None
+        self.enabled = False
+        if sys.platform.startswith("linux") and os.path.exists(self.device):
+            try:
+                self.fb_file = open(self.device, "wb")
+                self.enabled = True
+                print(f"[GUI FB] Direct Framebuffer aktif pada {self.device} ({self.width}x{self.height} RGB565)")
+            except Exception as e:
+                print(f"[GUI FB] Peringatan: Tidak dapat membuka {self.device}: {e}")
+
+    def blit(self, surface):
+        if not self.enabled or not self.fb_file:
+            return
+        try:
+            # pygame.surfarray.array3d menghasilkan array (width, height, 3)
+            # Transpose ke bentuk standar (height, width, 3)
+            arr = pygame.surfarray.array3d(surface)
+            arr = np.transpose(arr, (1, 0, 2))
+
+            # Konversi warna RGB888 ke RGB565 (5 bit Red, 6 bit Green, 5 bit Blue)
+            r = (arr[:, :, 0].astype(np.uint16) >> 3) << 11
+            g = (arr[:, :, 1].astype(np.uint16) >> 2) << 5
+            b = (arr[:, :, 2].astype(np.uint16) >> 3)
+            rgb565 = (r | g | b).astype(np.uint16)
+
+            self.fb_file.seek(0)
+            self.fb_file.write(rgb565.tobytes())
+            self.fb_file.flush()
+        except Exception:
+            pass
+
+    def close(self):
+        if self.fb_file:
+            try:
+                self.fb_file.close()
+            except Exception:
+                pass
+            self.fb_file = None
+            self.enabled = False
+
+
+class LinuxTouchReader:
+    """
+    Thread pemantau input sentuh hardware Linux (XPT2046 / ADS7846) via evdev.
+    Mengonversi sinyal sentuhan mentah (ABS_X, ABS_Y) ke koordinat layar LCD (320x240)
+    dan mengirim event ke antrian Pygame saat berjalan di mode direct framebuffer.
+    """
+    def __init__(self, width: int = 320, height: int = 240):
+        self.width = width
+        self.height = height
+        self.device = None
+        self.running = False
+        self.thread = None
+
+        if not (sys.platform.startswith("linux") and HAS_EVDEV):
+            return
+
+        dev_path = self._detect_device()
+        if dev_path:
+            try:
+                self.device = evdev.InputDevice(dev_path)
+                print(f"[GUI Touch] Terhubung ke perangkat sentuh: {self.device.name} ({dev_path})")
+            except Exception as e:
+                print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
+
+    def _detect_device(self) -> Optional[str]:
+        if os.path.exists("/dev/input/touchscreen"):
+            return "/dev/input/touchscreen"
+        try:
+            for path in evdev.list_devices():
+                dev = evdev.InputDevice(path)
+                caps = dev.capabilities()
+                if evdev.ecodes.EV_ABS in caps:
+                    name_lower = dev.name.lower()
+                    if any(k in name_lower for k in ("touch", "ads7846", "xpt2046")):
+                        return path
+        except Exception:
+            pass
+        return None
+
+    def start(self):
+        if self.device and not self.running:
+            self.running = True
+            self.thread = threading.Thread(target=self._read_loop, daemon=True)
+            self.thread.start()
+
+    def _read_loop(self):
+        raw_x = 0
+        raw_y = 0
+        max_adc = 4095
+        try:
+            for event in self.device.read_loop():
+                if not self.running:
+                    break
+                if event.type == evdev.ecodes.EV_ABS:
+                    if event.code == evdev.ecodes.ABS_X:
+                        raw_x = event.value
+                    elif event.code == evdev.ecodes.ABS_Y:
+                        raw_y = event.value
+                elif event.type == evdev.ecodes.EV_KEY:
+                    if event.code in (evdev.ecodes.BTN_TOUCH, evdev.ecodes.BTN_LEFT):
+                        if event.value == 1 and HAS_PYGAME:
+                            px = int((raw_x / max_adc) * self.width)
+                            py = int((raw_y / max_adc) * self.height)
+                            px = max(0, min(self.width - 1, px))
+                            py = max(0, min(self.height - 1, py))
+                            evt = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (px, py), "button": 1})
+                            pygame.event.post(evt)
+        except Exception:
+            pass
+
+    def stop(self):
+        self.running = False
 
 try:
     import tkinter as tk
@@ -79,6 +224,8 @@ class TFTGuiPygame:
         self.status_color = self.C_PRIMARY
         self.last_preview_surface = None
         self.last_update_preview = 0.0
+        self.fb_blitter = None
+        self.touch_reader = None
 
         # Inisialisasi tombol sentuh
         self.buttons = {}
@@ -127,12 +274,19 @@ class TFTGuiPygame:
 
     def init_display(self):
         """Inisialisasi layar Pygame (mendukung Linux Framebuffer /dev/fb1 untuk LCD SPI)."""
-        # Konfigurasi driver framebuffer jika di Raspberry Pi embedded
-        if os.path.exists("/dev/fb1") and not os.environ.get("DISPLAY"):
-            os.environ["SDL_FBDEV"] = "/dev/fb1"
+        # Konfigurasi display driver untuk Linux jika belum ada DISPLAY
+        if sys.platform.startswith("linux"):
+            if "DISPLAY" not in os.environ and "WAYLAND_DISPLAY" not in os.environ:
+                if os.path.exists("/tmp/.X11-unix/X0"):
+                    os.environ["DISPLAY"] = ":0"
+                elif os.path.exists("/dev/fb1") or not os.path.exists("/dev/tty0"):
+                    # Di mode headless / console / SSH: gunakan driver dummy
+                    # Buffer tampilan akan ditulis langsung ke /dev/fb1 oleh FramebufferBlitter
+                    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
         if os.path.exists("/dev/input/touchscreen"):
-            os.environ["SDL_MOUSEDRV"] = "TSLIB"
-            os.environ["SDL_MOUSEDEV"] = "/dev/input/touchscreen"
+            os.environ.setdefault("SDL_MOUSEDRV", "TSLIB")
+            os.environ.setdefault("SDL_MOUSEDEV", "/dev/input/touchscreen")
 
         pygame.init()
         pygame.font.init()
@@ -141,9 +295,23 @@ class TFTGuiPygame:
         if self.fullscreen:
             flags |= pygame.FULLSCREEN
 
-        self.screen = pygame.display.set_mode((self.width, self.height), flags)
+        try:
+            self.screen = pygame.display.set_mode((self.width, self.height), flags)
+        except pygame.error:
+            # Fallback jika SDL tidak menemukan monitor fisik (misal running via SSH)
+            os.environ["SDL_VIDEODRIVER"] = "dummy"
+            pygame.display.quit()
+            pygame.display.init()
+            self.screen = pygame.display.set_mode((self.width, self.height), flags)
+
         pygame.display.set_caption("Pembaca Tunanetra - 2.4 TFT")
         self.clock = pygame.time.Clock()
+
+        # Inisialisasi Direct Framebuffer Blitter & Touch Reader jika /dev/fb1 tersedia
+        if os.path.exists("/dev/fb1"):
+            self.fb_blitter = FramebufferBlitter(device="/dev/fb1", width=self.width, height=self.height)
+            self.touch_reader = LinuxTouchReader(width=self.width, height=self.height)
+            self.touch_reader.start()
 
         # Muat font sistem yang bersih
         self.font_title = pygame.font.SysFont("dejavusans,arial,helvetica", 13, bold=True)
@@ -388,9 +556,15 @@ class TFTGuiPygame:
                     self.screen.blit(sub_lbl, (sx, ly + lbl.get_height() + 2))
 
             pygame.display.flip()
+            if self.fb_blitter:
+                self.fb_blitter.blit(self.screen)
             # 15 FPS hemat daya & CPU
             self.clock.tick(15)
 
+        if self.touch_reader:
+            self.touch_reader.stop()
+        if self.fb_blitter:
+            self.fb_blitter.close()
         pygame.quit()
 
 
