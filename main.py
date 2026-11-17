@@ -120,19 +120,33 @@ class App:
         print("-> [2/3] Menginisialisasi kamera...")
         self.cap = cap if cap is not None else self._open_camera()
 
-        # Inisialisasi GPIO (LED & Tombol)
+        # Inisialisasi GPIO (LED & Tombol) dengan proteksi fallback jika pin sibuk / digunakan
         if HAS_GPIO:
-            self.led = DigitalOutputDevice(cfg['gpio']['led'])
-            self.btn_main = Button(
-                cfg['gpio']['btn_main'],
-                bounce_time=0.05,
-                hold_time=1.5
-            )
-            self.btn_aux = Button(
-                cfg['gpio']['btn_aux'],
-                bounce_time=0.05,
-                hold_time=3.0
-            )
+            try:
+                self.led = DigitalOutputDevice(cfg['gpio']['led'])
+            except Exception as e:
+                log.warning("GPIO LED (pin %s) sibuk atau tidak tersedia: %s. Menggunakan Mock.", cfg['gpio']['led'], e)
+                self.led = MockOutputDevice(cfg['gpio']['led'])
+
+            try:
+                self.btn_main = Button(
+                    cfg['gpio']['btn_main'],
+                    bounce_time=0.05,
+                    hold_time=1.5
+                )
+            except Exception as e:
+                log.warning("GPIO btn_main (pin %s) sibuk atau tidak tersedia: %s. Menggunakan Mock.", cfg['gpio']['btn_main'], e)
+                self.btn_main = MockButton(cfg['gpio']['btn_main'], hold_time=1.5)
+
+            try:
+                self.btn_aux = Button(
+                    cfg['gpio']['btn_aux'],
+                    bounce_time=0.05,
+                    hold_time=3.0
+                )
+            except Exception as e:
+                log.warning("GPIO btn_aux (pin %s) sibuk atau tidak tersedia: %s. Menggunakan Mock.", cfg['gpio']['btn_aux'], e)
+                self.btn_aux = MockButton(cfg['gpio']['btn_aux'], hold_time=3.0)
         else:
             self.led = MockOutputDevice(cfg['gpio']['led'])
             self.btn_main = MockButton(cfg['gpio']['btn_main'], hold_time=1.5)
