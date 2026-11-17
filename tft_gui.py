@@ -123,9 +123,12 @@ class LinuxTouchReader:
     Mengonversi sinyal sentuhan mentah (ABS_X, ABS_Y) ke koordinat layar LCD (320x240)
     dan mengirim event ke antrian Pygame saat berjalan di mode direct framebuffer.
     """
-    def __init__(self, width: int = 320, height: int = 240):
+    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False):
         self.width = width
         self.height = height
+        self.swap_xy = swap_xy
+        self.invert_x = invert_x
+        self.invert_y = invert_y
         self.device = None
         self.running = False
         self.thread = None
@@ -165,7 +168,8 @@ class LinuxTouchReader:
     def _read_loop(self):
         raw_x = 0
         raw_y = 0
-        max_adc = 4095
+        min_adc_x, max_adc_x = 180, 3920
+        min_adc_y, max_adc_y = 180, 3920
         try:
             for event in self.device.read_loop():
                 if not self.running:
@@ -178,8 +182,20 @@ class LinuxTouchReader:
                 elif event.type == evdev.ecodes.EV_KEY:
                     if event.code in (evdev.ecodes.BTN_TOUCH, evdev.ecodes.BTN_LEFT):
                         if event.value == 1 and HAS_PYGAME:
-                            px = int((raw_x / max_adc) * self.width)
-                            py = int((raw_y / max_adc) * self.height)
+                            nx = (raw_x - min_adc_x) / max(1, (max_adc_x - min_adc_x))
+                            ny = (raw_y - min_adc_y) / max(1, (max_adc_y - min_adc_y))
+                            nx = max(0.0, min(1.0, nx))
+                            ny = max(0.0, min(1.0, ny))
+
+                            if self.swap_xy:
+                                nx, ny = ny, nx
+                            if self.invert_x:
+                                nx = 1.0 - nx
+                            if self.invert_y:
+                                ny = 1.0 - ny
+
+                            px = int(nx * self.width)
+                            py = int(ny * self.height)
                             px = max(0, min(self.width - 1, px))
                             py = max(0, min(self.height - 1, py))
                             evt = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (px, py), "button": 1})
@@ -228,7 +244,7 @@ class TFTGuiPygame:
         self.C_DANGER = (239, 68, 68)     # Red (Shutdown)
         self.C_ACCENT = (14, 165, 233)    # Sky-500
 
-        # Status Tampilan
+        # Status Tampilan & Interaktivitas
         self.status_msg = "ALAT SIAP"
         self.status_color = self.C_PRIMARY
         self.last_preview_surface = None
@@ -236,48 +252,79 @@ class TFTGuiPygame:
         self.fb_blitter = None
         self.touch_reader = None
 
+        # Kontrol Dialog Daya & Animasi Sentuh
+        self.show_power_dialog = False
+        self.pressed_button = None
+        self.pressed_until = 0.0
+        self._last_temp_check = 0.0
+        self._cached_temp = ""
+
         # Inisialisasi tombol sentuh
         self.buttons = {}
+        self.modal_buttons = {}
         self._init_buttons()
 
     def _init_buttons(self):
-        """Mendefinisikan area dan aksi tombol sentuh."""
+        """Mendefinisikan area dan aksi tombol sentuh (dioptimalkan untuk sentuhan jari 2.4 inch)."""
         rect_factory = pygame.Rect if HAS_PYGAME else SimpleRect
+        # 5 Tombol Sentuh Baris Bawah (Tinggi 62px untuk kenyamanan sentuhan jari pada layar 2.4")
         self.buttons = {
             "read": {
-                "rect": rect_factory(8, 172, 110, 60),
+                "rect": rect_factory(6, 172, 94, 62),
                 "label": "BACA",
                 "sub": "FOTO & OCR",
                 "color": self.C_PRIMARY,
                 "action": self._action_read
             },
             "replay": {
-                "rect": rect_factory(124, 172, 58, 60),
+                "rect": rect_factory(104, 172, 52, 62),
                 "label": "ULANG",
                 "sub": "REPLAY",
                 "color": self.C_INFO,
                 "action": self._action_replay
             },
             "stop": {
-                "rect": rect_factory(188, 172, 58, 60),
+                "rect": rect_factory(160, 172, 50, 62),
                 "label": "STOP",
                 "sub": "AUDIO",
                 "color": self.C_WARNING,
                 "action": self._action_stop
             },
             "vol": {
-                "rect": rect_factory(252, 172, 60, 28),
+                "rect": rect_factory(214, 172, 50, 62),
                 "label": "VOL",
-                "sub": "",
-                "color": self.C_CARD,
+                "sub": "80%",
+                "color": self.C_ACCENT,
                 "action": self._action_vol
             },
             "off": {
-                "rect": rect_factory(252, 204, 60, 28),
+                "rect": rect_factory(268, 172, 46, 62),
                 "label": "OFF",
-                "sub": "",
+                "sub": "POWER",
                 "color": self.C_DANGER,
                 "action": self._action_shutdown
+            }
+        }
+
+        # Tombol Modal Dialog Konfirmasi Daya / Keluar
+        self.modal_buttons = {
+            "shutdown": {
+                "rect": rect_factory(45, 80, 230, 36),
+                "label": "⏻ MATIKAN PI (SHUTDOWN)",
+                "color": self.C_DANGER,
+                "action": self._confirm_shutdown
+            },
+            "exit": {
+                "rect": rect_factory(45, 126, 110, 34),
+                "label": "🚪 MENU UTAMA",
+                "color": self.C_INFO,
+                "action": self._confirm_exit_gui
+            },
+            "cancel": {
+                "rect": rect_factory(165, 126, 110, 34),
+                "label": "✖ BATAL",
+                "color": (71, 85, 105),
+                "action": self._cancel_dialog
             }
         }
 
@@ -323,60 +370,27 @@ class TFTGuiPygame:
 
         if os.path.exists(target_fb):
             self.fb_blitter = FramebufferBlitter(device=target_fb, width=self.width, height=self.height)
-            self.touch_reader = LinuxTouchReader(width=self.width, height=self.height)
+            # Kalibrasi touch dari config.toml jika tersedia
+            t_cfg = {}
+            if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
+                t_cfg = self.app.cfg.get('gui', {}).get('touch', {})
+            swap_xy = bool(t_cfg.get('swap_xy', False))
+            inv_x = bool(t_cfg.get('invert_x', False))
+            inv_y = bool(t_cfg.get('invert_y', False))
+
+            self.touch_reader = LinuxTouchReader(
+                width=self.width, height=self.height,
+                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y
+            )
             self.touch_reader.start()
 
         # Muat font sistem yang bersih
-        self.font_title = pygame.font.SysFont("dejavusans,arial,helvetica", 13, bold=True)
-        self.font_status = pygame.font.SysFont("dejavusans,arial,helvetica", 12, bold=True)
+        self.font_title = pygame.font.SysFont("dejavusans,arial,helvetica", 12, bold=True)
+        self.font_status = pygame.font.SysFont("dejavusans,arial,helvetica", 11, bold=True)
         self.font_btn = pygame.font.SysFont("dejavusans,arial,helvetica", 11, bold=True)
         self.font_btn_lg = pygame.font.SysFont("dejavusans,arial,helvetica", 13, bold=True)
         self.font_text = pygame.font.SysFont("dejavusans,arial,helvetica", 10)
         self.font_stats = pygame.font.SysFont("monospace,consolas", 9)
-
-        # Definisikan tata letak tombol sentuh untuk 320x240
-        # Layout Landscape 320x240:
-        # [ Header Status Bar: 320 x 28 ]
-        # [ Sisi Kiri: Mini Camera Preview + Kualitas: 120 x 135 ]
-        # [ Sisi Kanan: Cuplikan Teks Bacaan: 185 x 135 ]
-        # [ Bawah: 4 Tombol Sentuh Besar: 320 x 70 ]
-        self.buttons = {
-            "read": {
-                "rect": pygame.Rect(8, 172, 110, 60),
-                "label": "BACA",
-                "sub": "FOTO & OCR",
-                "color": self.C_PRIMARY,
-                "action": self._action_read
-            },
-            "replay": {
-                "rect": pygame.Rect(124, 172, 58, 60),
-                "label": "ULANG",
-                "sub": "REPLAY",
-                "color": self.C_INFO,
-                "action": self._action_replay
-            },
-            "stop": {
-                "rect": pygame.Rect(188, 172, 58, 60),
-                "label": "STOP",
-                "sub": "AUDIO",
-                "color": self.C_WARNING,
-                "action": self._action_stop
-            },
-            "vol": {
-                "rect": pygame.Rect(252, 172, 60, 28),
-                "label": "VOL",
-                "sub": "",
-                "color": self.C_CARD,
-                "action": self._action_vol
-            },
-            "off": {
-                "rect": pygame.Rect(252, 204, 60, 28),
-                "label": "OFF",
-                "sub": "",
-                "color": self.C_DANGER,
-                "action": self._action_shutdown
-            }
-        }
 
     def _action_read(self):
         if not self.app.busy:
@@ -386,6 +400,8 @@ class TFTGuiPygame:
 
     def _action_replay(self):
         if not self.app.busy:
+            self.status_msg = "MEMUTAR ULANG..."
+            self.status_color = self.C_INFO
             self.app._run_async(self.app.replay)
 
     def _action_stop(self):
@@ -394,17 +410,46 @@ class TFTGuiPygame:
         self.status_color = self.C_TEXT_MUTED
 
     def _action_vol(self):
+        """Ubah volume audio secara siklis dan tampilkan nilai barunya."""
         self.app._run_async(self.app.cycle_volume)
+        idx = (self.app.current_vol_idx + 1) % len(self.app.volume_steps)
+        self.status_msg = f"VOL: {self.app.volume_steps[idx]}%"
+        self.status_color = self.C_ACCENT
 
     def _action_shutdown(self):
+        """Buka dialog konfirmasi aman untuk mencegah salah sentuh saat membaca."""
+        self.show_power_dialog = True
+
+    def _confirm_shutdown(self):
         self.status_msg = "MEMATIKAN PI..."
         self.status_color = self.C_DANGER
+        self.show_power_dialog = False
         self.app._run_async(self.app.safe_shutdown)
+
+    def _confirm_exit_gui(self):
+        """Keluar dari GUI dan kembali ke menu terminal."""
+        self.show_power_dialog = False
+        self.running = False
+
+    def _cancel_dialog(self):
+        self.show_power_dialog = False
+
+    def _get_cpu_temp(self) -> str:
+        """Membaca suhu CPU Raspberry Pi secara berkala."""
+        now = time.time()
+        if now - self._last_temp_check > 3.0:
+            self._last_temp_check = now
+            if os.path.exists('/sys/class/thermal/thermal_zone0/temp'):
+                try:
+                    with open('/sys/class/thermal/thermal_zone0/temp', 'r') as tf:
+                        self._cached_temp = f"{int(tf.read().strip()) // 1000}°C"
+                except Exception:
+                    self._cached_temp = ""
+        return self._cached_temp
 
     def update_preview_surface(self):
         """Membuat thumbnail kamera mini untuk pratinjau di layar 2.4 inci."""
         now = time.time()
-        # Perbarui thumbnail setiap 0.5 detik agar CPU hemat
         if now - self.last_update_preview < 0.5:
             return
 
@@ -416,7 +461,6 @@ class TFTGuiPygame:
                 frame = None
 
         if frame is None:
-            # Gunakan placeholder kotak jika kamera belum terbuka
             surf = pygame.Surface((110, 80))
             surf.fill((20, 25, 35))
             txt = self.font_stats.render("KAMERA READY", True, self.C_TEXT_MUTED)
@@ -424,58 +468,71 @@ class TFTGuiPygame:
             self.last_preview_surface = surf
             return
 
-        # Resize ke ukuran thumbnail 110x80
         thumb = cv2.resize(frame, (110, 80), interpolation=cv2.INTER_AREA)
-        # BGR ke RGB untuk Pygame
         thumb_rgb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
-        # Transpose untuk surface pygame (width, height, channels)
         thumb_rgb = np.rot90(thumb_rgb)
         thumb_rgb = np.flipud(thumb_rgb)
         self.last_preview_surface = pygame.surfarray.make_surface(thumb_rgb)
 
     def run(self):
-        """Loop utama GUI Pygame."""
+        """Loop utama GUI Pygame dengan responsivitas sentuhan tinggi."""
         self.init_display()
         self.running = True
 
         while self.running:
-            # 1. Tangani Event Sentuhan & Keyboard
+            # 1. Tangani Event Sentuhan Layar & Keyboard
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
-                    # Koordinat sentuhan layar
                     if event.type == pygame.MOUSEBUTTONDOWN:
                         pos = event.pos
                     else:
                         pos = (int(event.x * self.width), int(event.y * self.height))
 
-                    for name, btn in self.buttons.items():
-                        if btn["rect"].collidepoint(pos):
-                            # Efek visual klik
-                            btn["action"]()
-                            break
+                    if self.show_power_dialog:
+                        # Event klik pada modal dialog daya
+                        for name, btn in self.modal_buttons.items():
+                            if btn["rect"].collidepoint(pos):
+                                btn["action"]()
+                                break
+                    else:
+                        # Event klik tombol utama baris bawah
+                        for name, btn in self.buttons.items():
+                            if btn["rect"].collidepoint(pos):
+                                self.pressed_button = name
+                                self.pressed_until = time.time() + 0.18
+                                btn["action"]()
+                                break
                 elif event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                        self._action_read()
-                    elif event.key == pygame.K_r:
-                        self._action_replay()
-                    elif event.key == pygame.K_s:
-                        self._action_stop()
-                    elif event.key == pygame.K_v:
-                        self._action_vol()
-                    elif event.key in (pygame.K_ESCAPE, pygame.K_q):
-                        self.running = False
+                    if self.show_power_dialog:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_b):
+                            self._cancel_dialog()
+                        elif event.key == pygame.K_RETURN:
+                            self._confirm_shutdown()
+                        elif event.key == pygame.K_q:
+                            self._confirm_exit_gui()
+                    else:
+                        if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                            self._action_read()
+                        elif event.key == pygame.K_r:
+                            self._action_replay()
+                        elif event.key == pygame.K_s:
+                            self._action_stop()
+                        elif event.key == pygame.K_v:
+                            self._action_vol()
+                        elif event.key in (pygame.K_ESCAPE, pygame.K_q):
+                            self.show_power_dialog = True
 
             # 2. Sinkronisasi Status Mesin App
             if self.app.busy:
                 if self.app.speaker.playing:
-                    self.status_msg = "MEMBACA SUARA..."
+                    self.status_msg = "MEMBACA..."
                     self.status_color = self.C_INFO
                 else:
-                    self.status_msg = "MEMPROSES OCR..."
+                    self.status_msg = "MEMPROSES..."
                     self.status_color = self.C_WARNING
-            else:
+            elif not self.show_power_dialog and not self.status_msg.startswith("VOL:"):
                 self.status_msg = "ALAT SIAP"
                 self.status_color = self.C_PRIMARY
 
@@ -486,7 +543,9 @@ class TFTGuiPygame:
             pygame.draw.rect(self.screen, self.C_CARD, pygame.Rect(0, 0, self.width, 26))
             pygame.draw.line(self.screen, self.C_CARD_BORDER, (0, 26), (self.width, 26), 1)
 
-            title_surf = self.font_title.render("PEMBACA TUNANETRA", True, self.C_TEXT)
+            temp_str = self._get_cpu_temp()
+            hdr_text = f"PEMBACA TUNANETRA" + (f" | {temp_str}" if temp_str else "")
+            title_surf = self.font_title.render(hdr_text, True, self.C_TEXT)
             self.screen.blit(title_surf, (8, 6))
 
             # Status Pill (Badge)
@@ -495,34 +554,32 @@ class TFTGuiPygame:
             self.screen.blit(status_surf, (st_x, 7))
 
             # --- B. Kartu Kiri: Pratinjau Kamera (118 x 136) ---
-            card_cam = pygame.Rect(8, 32, 118, 134)
+            card_cam = pygame.Rect(6, 30, 118, 136)
             pygame.draw.rect(self.screen, self.C_CARD, card_cam, border_radius=6)
             pygame.draw.rect(self.screen, self.C_CARD_BORDER, card_cam, width=1, border_radius=6)
 
             self.update_preview_surface()
             if self.last_preview_surface:
-                self.screen.blit(self.last_preview_surface, (12, 36))
+                self.screen.blit(self.last_preview_surface, (10, 34))
 
-            # Info resolusi / fokus
-            stats_cam = f"CAM: 1080p | AF"
+            # Info kamera & volume di bawah thumbnail
+            stats_cam = "CAM: 1080p | AF"
             lbl_cam = self.font_stats.render(stats_cam, True, self.C_TEXT_MUTED)
-            self.screen.blit(lbl_cam, (14, 120))
+            self.screen.blit(lbl_cam, (12, 118))
 
             vol_val = self.app.volume_steps[self.app.current_vol_idx]
-            lbl_vol_info = self.font_stats.render(f"VOL: {vol_val}%", True, self.C_ACCENT)
-            self.screen.blit(lbl_vol_info, (14, 136))
+            lbl_vol_info = self.font_stats.render(f"AUDIO: {vol_val}%", True, self.C_ACCENT)
+            self.screen.blit(lbl_vol_info, (12, 134))
 
-            # --- C. Kartu Kanan: Cuplikan Teks Bacaan (180 x 136) ---
-            card_txt = pygame.Rect(132, 32, 180, 134)
+            # --- C. Kartu Kanan: Cuplikan Teks Bacaan (186 x 136) ---
+            card_txt = pygame.Rect(128, 30, 186, 136)
             pygame.draw.rect(self.screen, self.C_CARD, card_txt, border_radius=6)
             pygame.draw.rect(self.screen, self.C_CARD_BORDER, card_txt, width=1, border_radius=6)
 
             hdr_txt = self.font_btn.render("TEKS DIBACA:", True, self.C_TEXT_MUTED)
-            self.screen.blit(hdr_txt, (138, 36))
+            self.screen.blit(hdr_txt, (134, 34))
 
-            # Tampilkan 4-5 baris cuplikan teks terakhir
             full_text = " ".join(self.app.last_reading) if self.app.last_reading else "Belum ada dokumen yang dibaca. Tekan tombol [BACA] untuk memotret."
-            # Bungkus teks per baris (~26 karakter per baris)
             words = full_text.split()
             lines = []
             cur_line = ""
@@ -537,41 +594,73 @@ class TFTGuiPygame:
             if cur_line and len(lines) < 5:
                 lines.append(cur_line)
 
-            y_txt = 52
+            y_txt = 50
             for l in lines:
                 l_surf = self.font_text.render(l, True, self.C_TEXT)
-                self.screen.blit(l_surf, (138, y_txt))
+                self.screen.blit(l_surf, (134, y_txt))
                 y_txt += 15
 
-            # --- D. Tombol Sentuh Bawah ---
+            # --- D. Tombol Sentuh Bawah (Tinggi 62px) ---
             for name, btn in self.buttons.items():
                 r = btn["rect"]
                 col = btn["color"]
 
-                # Update label khusus untuk volume
+                # Efek visual saat tombol disentuh
+                is_pressed = (self.pressed_button == name and time.time() < self.pressed_until)
+                if is_pressed:
+                    col = tuple(min(255, c + 35) for c in col)
+
                 label_txt = btn["label"]
+                sub_txt = btn["sub"]
                 if name == "vol":
-                    label_txt = f"V {vol_val}%"
+                    sub_txt = f"{vol_val}%"
 
                 pygame.draw.rect(self.screen, col, r, border_radius=6)
-                pygame.draw.rect(self.screen, (255, 255, 255, 40), r, width=1, border_radius=6)
+                border_col = (255, 255, 255, 120) if is_pressed else (255, 255, 255, 40)
+                pygame.draw.rect(self.screen, border_col, r, width=2 if is_pressed else 1, border_radius=6)
 
-                # Render teks tombol
                 fnt = self.font_btn_lg if name == "read" else self.font_btn
                 lbl = fnt.render(label_txt, True, (255, 255, 255))
                 lx = r.x + (r.width - lbl.get_width()) // 2
-                ly = r.y + (8 if btn["sub"] else (r.height - lbl.get_height()) // 2)
+                ly = r.y + (10 if sub_txt else (r.height - lbl.get_height()) // 2)
                 self.screen.blit(lbl, (lx, ly))
 
-                if btn["sub"]:
-                    sub_lbl = self.font_stats.render(btn["sub"], True, (240, 240, 240))
+                if sub_txt:
+                    sub_lbl = self.font_stats.render(sub_txt, True, (240, 240, 240))
                     sx = r.x + (r.width - sub_lbl.get_width()) // 2
-                    self.screen.blit(sub_lbl, (sx, ly + lbl.get_height() + 2))
+                    self.screen.blit(sub_lbl, (sx, ly + lbl.get_height() + 3))
+
+            # --- E. Modal Dialog Konfirmasi Daya / Keluar ---
+            if self.show_power_dialog:
+                # Dim background
+                overlay = pygame.Surface((self.width, self.height))
+                overlay.set_alpha(190)
+                overlay.fill((0, 0, 0))
+                self.screen.blit(overlay, (0, 0))
+
+                # Frame Dialog Panel
+                dlg_rect = pygame.Rect(35, 42, 250, 134)
+                pygame.draw.rect(self.screen, self.C_CARD, dlg_rect, border_radius=8)
+                pygame.draw.rect(self.screen, self.C_CARD_BORDER, dlg_rect, width=2, border_radius=8)
+
+                dlg_title = self.font_title.render("MENU DAYA & SISTEM", True, self.C_TEXT)
+                self.screen.blit(dlg_title, (dlg_rect.x + (dlg_rect.width - dlg_title.get_width()) // 2, 52))
+
+                for m_name, m_btn in self.modal_buttons.items():
+                    mr = m_btn["rect"]
+                    mcol = m_btn["color"]
+                    pygame.draw.rect(self.screen, mcol, mr, border_radius=6)
+                    pygame.draw.rect(self.screen, (255, 255, 255, 40), mr, width=1, border_radius=6)
+
+                    mfnt = self.font_btn_lg if m_name == "shutdown" else self.font_btn
+                    mlbl = mfnt.render(m_btn["label"], True, (255, 255, 255))
+                    mlx = mr.x + (mr.width - mlbl.get_width()) // 2
+                    mly = mr.y + (mr.height - mlbl.get_height()) // 2
+                    self.screen.blit(mlbl, (mlx, mly))
 
             pygame.display.flip()
             if self.fb_blitter:
                 self.fb_blitter.blit(self.screen)
-            # 15 FPS hemat daya & CPU
             self.clock.tick(15)
 
         if self.touch_reader:
