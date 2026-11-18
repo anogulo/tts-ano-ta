@@ -42,7 +42,7 @@ video_driver = "fbcon"  # Driver video Pygame/SDL (fbcon | dummy)
 
 [gui.touch]
 enabled = true           # Aktifkan pembaca sentuh/mouse hardware
-swap_xy = false          # Ubah ke true jika sumbu X dan Y tertukar
-invert_x = false         # Ubah ke true jika sentuhan horizontal terbalik
-invert_y = false         # Ubah ke true jika sentuhan vertikal terbalik
+swap_xy = true           # True untuk LCD SPI 2.4" ILI9341 Landscape (320x240)
+invert_x = false         # False untuk orientasi standar modul 2.4"
+invert_y = true          # True agar baris tombol bawah sesuai koordinat fisik LCD
 device = ""              # Kosongkan untuk auto-detect (/dev/input/touchscreen atau event*)

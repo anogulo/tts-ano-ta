@@ -123,7 +123,7 @@ class LinuxTouchReader:
     Mengonversi sinyal sentuhan ke koordinat layar LCD (320x240)
     dan mengirim event ke antrian Pygame secara akurat tanpa deadzone.
     """
-    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False, device_path: str = ""):
+    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = True, invert_x: bool = False, invert_y: bool = True, device_path: str = ""):
         self.width = width
         self.height = height
         self.swap_xy = swap_xy
@@ -256,6 +256,9 @@ class LinuxTouchReader:
                                 self.is_touch_down = False
                                 px, py = self._calc_screen_coords()
                                 self._post_click(px, py)
+                            self.is_touch_down = False
+                            self.raw_x = None
+                            self.raw_y = None
 
                 elif event.type == evdev.ecodes.EV_SYN and getattr(evdev.ecodes, 'SYN_REPORT', 0) == event.code:
                     if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
@@ -343,6 +346,8 @@ class TFTGuiPygame:
         self.show_power_dialog = False
         self.pressed_button = None
         self.pressed_until = 0.0
+        self.last_touch_pos = None
+        self.last_touch_time = 0.0
         self._last_temp_check = 0.0
         self._cached_temp = ""
 
@@ -715,6 +720,8 @@ class TFTGuiPygame:
                         pos = (int(event.x * self.width), int(event.y * self.height))
 
                     px, py = pos
+                    self.last_touch_pos = (px, py)
+                    self.last_touch_time = time.time()
                     print(f"[GUI Event] Klik/Sentuh terdeteksi di layar pada koordinat ({px}, {py})")
 
                     if self.show_power_dialog:
@@ -937,6 +944,11 @@ class TFTGuiPygame:
                     mlx = mr.x + (mr.width - mlbl.get_width()) // 2
                     mly = mr.y + (mr.height - mlbl.get_height()) // 2
                     self.screen.blit(mlbl, (mlx, mly))
+
+            # Feedback visual titik sentuhan sesaat di layar
+            if self.last_touch_pos and (time.time() - self.last_touch_time < 0.6):
+                pygame.draw.circle(self.screen, (255, 255, 255), self.last_touch_pos, 6, 2)
+                pygame.draw.circle(self.screen, (250, 204, 21), self.last_touch_pos, 3)
 
             pygame.display.flip()
             if self.fb_blitter:
