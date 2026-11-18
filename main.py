@@ -113,6 +113,7 @@ class App:
     """
 
     def __init__(self, cap=None, init_cue=True):
+        self.cfg = cfg
         print("-> [1/3] Memuat model Piper TTS ke memori...")
         model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg['tts']['model'])
         self.speaker = Speaker(model_path, cfg['audio']['device'])

@@ -231,7 +231,7 @@ class LinuxTouchReader:
         if now - self.last_click_ts < 0.22:
             return
         self.last_click_ts = now
-        print(f"[GUI Input] Klik/Sentuh terkirim ke Pygame: ({px}, {py})")
+        print(f"[GUI Input] Klik/Sentuh terkirim ke Pygame: ({px}, {py}) [RAW ADC: x={self.raw_x}, y={self.raw_y}]")
         evt = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (px, py), "button": 1})
         pygame.event.post(evt)
 
@@ -415,6 +415,21 @@ class TFTGuiPygame:
             }
         }
 
+    def _get_touch_config(self) -> dict:
+        t_cfg = {}
+        if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
+            t_cfg = self.app.cfg.get('gui', {}).get('touch', {})
+        if not t_cfg:
+            try:
+                cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.toml')
+                import tomllib
+                with open(cfg_path, 'rb') as f:
+                    c_all = tomllib.load(f)
+                    t_cfg = c_all.get('gui', {}).get('touch', {})
+            except Exception:
+                pass
+        return t_cfg or {}
+
     def init_display(self):
         """Inisialisasi layar Pygame (mendukung Linux Framebuffer /dev/fb1 untuk LCD SPI)."""
         # Konfigurasi display driver untuk Linux jika belum ada DISPLAY
@@ -457,40 +472,20 @@ class TFTGuiPygame:
 
         if os.path.exists(target_fb):
             self.fb_blitter = FramebufferBlitter(device=target_fb, width=self.width, height=self.height)
-            # Kalibrasi touch dari config.toml jika tersedia
-            t_cfg = {}
-            if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
-                t_cfg = self.app.cfg.get('gui', {}).get('touch', {})\
-                    if isinstance(self.app.cfg, dict) else {}
-            elif hasattr(self.app, 'cfg') and hasattr(self.app.cfg, 'get'):
-                t_cfg = {}
 
-            swap_xy = bool(t_cfg.get('swap_xy', False))
-            inv_x = bool(t_cfg.get('invert_x', False))
-            inv_y = bool(t_cfg.get('invert_y', False))
-            dev_path_touch = str(t_cfg.get('device', ''))
+        # Muat konfigurasi touch dari config.toml
+        t_cfg = self._get_touch_config()
+        swap_xy = bool(t_cfg.get('swap_xy', True))
+        inv_x = bool(t_cfg.get('invert_x', False))
+        inv_y = bool(t_cfg.get('invert_y', True))
+        dev_path_touch = str(t_cfg.get('device', ''))
 
-            self.touch_reader = LinuxTouchReader(
-                width=self.width, height=self.height,
-                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
-                device_path=dev_path_touch
-            )
-            self.touch_reader.start()
-        else:
-            # Tanpa framebuffer fisik (mis. simulasi di SSH): tetap aktifkan touch reader
-            t_cfg = {}
-            if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
-                t_cfg = self.app.cfg.get('gui', {}).get('touch', {})
-            swap_xy = bool(t_cfg.get('swap_xy', False))
-            inv_x = bool(t_cfg.get('invert_x', False))
-            inv_y = bool(t_cfg.get('invert_y', False))
-            dev_path_touch = str(t_cfg.get('device', ''))
-            self.touch_reader = LinuxTouchReader(
-                width=self.width, height=self.height,
-                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
-                device_path=dev_path_touch
-            )
-            self.touch_reader.start()
+        self.touch_reader = LinuxTouchReader(
+            width=self.width, height=self.height,
+            swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
+            device_path=dev_path_touch
+        )
+        self.touch_reader.start()
 
         # Muat font sistem yang bersih
         self.font_title = pygame.font.SysFont("dejavusans,arial,helvetica", 12, bold=True)
@@ -689,13 +684,13 @@ class TFTGuiPygame:
                     if self.show_power_dialog:
                         # Event klik pada modal dialog daya
                         if 70 <= py <= 118 and 35 <= px <= 285:
-                            print("[GUI Event] Klik -> MATIKAN PI")
+                            print("[GUI Event] Klik Modal -> MATIKAN PI")
                             self._confirm_shutdown()
                         elif 120 <= py <= 165 and 35 <= px < 160:
-                            print("[GUI Event] Klik -> MENU UTAMA")
+                            print("[GUI Event] Klik Modal -> MENU UTAMA")
                             self._confirm_exit_gui()
                         elif 120 <= py <= 165 and 160 <= px <= 285:
-                            print("[GUI Event] Klik -> BATAL")
+                            print("[GUI Event] Klik Modal -> BATAL")
                             self._cancel_dialog()
                         else:
                             for name, btn in self.modal_buttons.items():
@@ -703,52 +698,21 @@ class TFTGuiPygame:
                                     btn["action"]()
                                     break
                     else:
-                        # 1. Baris tombol utama bawah (y >= 160) dengan toleransi kolom tanpa celah mati
-                        if py >= 160:
-                            if px < 102:
-                                print("[GUI Event] Klik -> BACA")
-                                self.pressed_button = "read"
+                        # Cek setiap tombol utama di baris bawah dengan toleransi padding
+                        handled = False
+                        for name, btn in self.buttons.items():
+                            # Perluas area klik (+8px lebar, +8px tinggi) agar ramah sentuhan jari
+                            hit_rect = btn["rect"].inflate(8, 8)
+                            if hit_rect.collidepoint(pos):
+                                print(f"[GUI Event] Tombol [{btn['label']}] DITEKAN pada koordinat ({px}, {py})")
+                                self.pressed_button = name
                                 self.pressed_until = time.time() + 0.25
-                                self._action_read()
-                            elif px < 158:
-                                print("[GUI Event] Klik -> ULANG")
-                                self.pressed_button = "replay"
-                                self.pressed_until = time.time() + 0.25
-                                self._action_replay()
-                            elif px < 212:
-                                print("[GUI Event] Klik -> STOP")
-                                self.pressed_button = "stop"
-                                self.pressed_until = time.time() + 0.25
-                                self._action_stop()
-                            elif px < 266:
-                                print("[GUI Event] Klik -> VOL")
-                                self.pressed_button = "vol"
-                                self.pressed_until = time.time() + 0.25
-                                self._action_vol()
-                            else:
-                                print("[GUI Event] Klik -> OFF")
-                                self.pressed_button = "off"
-                                self.pressed_until = time.time() + 0.25
-                                self._action_shutdown()
+                                btn["action"]()
+                                handled = True
+                                break
 
-                        # 2. Sentuhan pada kartu thumbnail kamera (y < 160, x < 125) -> BACA
-                        elif 28 <= py < 160 and px < 125:
-                            print("[GUI Event] Klik Thumbnail Kamera -> BACA")
-                            self.pressed_button = "read"
-                            self.pressed_until = time.time() + 0.25
-                            self._action_read()
-
-                        # 3. Sentuhan pada kartu teks bacaan (y < 160, x >= 125) -> ULANG
-                        elif 28 <= py < 160 and px >= 125:
-                            print("[GUI Event] Klik Kartu Teks -> ULANG")
-                            self.pressed_button = "replay"
-                            self.pressed_until = time.time() + 0.25
-                            self._action_replay()
-
-                        # 4. Sentuhan pada status/volume bar atas -> VOL
-                        elif py < 28 and px > 200:
-                            print("[GUI Event] Klik Status Bar -> VOL")
-                            self._action_vol()
+                        if not handled:
+                            print(f"[GUI Event] Sentuhan di ({px}, {py}) berada di luar area tombol.")
                 elif event.type == pygame.KEYDOWN:
                     if self.show_power_dialog:
                         if event.key in (pygame.K_ESCAPE, pygame.K_b):
