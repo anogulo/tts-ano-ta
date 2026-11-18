@@ -193,46 +193,69 @@ class App:
         c = cfg['camera']
         preferred_id = device_id if device_id is not None else c.get('device', 0)
 
-        # Cari pada preferred_id terlebih dahulu, lalu coba device lain jika gagal
+        # Cari pada preferred_id terlebih dahulu, lalu deteksi node video yang tersedia
         candidates = [preferred_id]
-        for alt_id in (0, 1, 2, 3):
+        if platform.system() == "Linux":
+            import glob
+            dev_nodes = sorted(glob.glob('/dev/video*'))
+            for dn in dev_nodes:
+                try:
+                    num = int(dn.replace('/dev/video', ''))
+                    # Batasi < 10 agar fokus pada USB camera dan menghindari rpi codec hardware
+                    if num not in candidates and num < 10:
+                        candidates.append(num)
+                except ValueError:
+                    pass
+        for alt_id in (0, 1, 2, 3, 4, 5):
             if alt_id not in candidates:
                 candidates.append(alt_id)
 
+        from terminal_view import _suppress_stderr, _restore_stderr
+
         for dev_id in candidates:
             cap = None
-            if platform.system() == "Linux":
-                cap = cv2.VideoCapture(dev_id, cv2.CAP_V4L2)
-                if not cap.isOpened():
-                    cap = cv2.VideoCapture(dev_id)
-            elif platform.system() == "Windows":
-                cap = cv2.VideoCapture(dev_id, cv2.CAP_DSHOW)
-                if not cap.isOpened():
-                    cap = cv2.VideoCapture(dev_id)
-            else:
-                cap = cv2.VideoCapture(dev_id)
-
-            if cap is not None and cap.isOpened():
-                try:
-                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, c.get('width', 1920))
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, c.get('height', 1080))
-                    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-                    if hasattr(cv2, 'CAP_PROP_BUFFERSIZE'):
-                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                except Exception:
-                    pass
-
-                # Pastikan stream benar-benar bisa menghasilkan gambar (bukan dummy/codec device)
-                ok, test_f = cap.read()
-                if ok and test_f is not None and test_f.size > 0:
-                    if dev_id != preferred_id:
-                        log.info("Kamera dialihkan otomatis dari device %s ke device %s", preferred_id, dev_id)
-                        c['device'] = dev_id
-                    log.info("Kamera aktif pada device %s (Target Resolusi: %dx%d)", dev_id, c.get('width', 1920), c.get('height', 1080))
-                    return cap
+            s_fd = _suppress_stderr()
+            try:
+                if platform.system() == "Linux":
+                    cap = cv2.VideoCapture(dev_id, cv2.CAP_V4L2)
+                    if not cap.isOpened():
+                        cap = cv2.VideoCapture(dev_id)
+                elif platform.system() == "Windows":
+                    cap = cv2.VideoCapture(dev_id, cv2.CAP_DSHOW)
+                    if not cap.isOpened():
+                        cap = cv2.VideoCapture(dev_id)
                 else:
-                    cap.release()
+                    cap = cv2.VideoCapture(dev_id)
+
+                if cap is not None and cap.isOpened():
+                    try:
+                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, c.get('width', 1920))
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, c.get('height', 1080))
+                        cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                        if hasattr(cv2, 'CAP_PROP_BUFFERSIZE'):
+                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+
+                    # Pastikan stream benar-benar bisa menghasilkan gambar (bukan dummy/codec device)
+                    ok, test_f = cap.read()
+                    if ok and test_f is not None and test_f.size > 0:
+                        if dev_id != preferred_id:
+                            log.info("Kamera dialihkan otomatis dari device %s ke device %s", preferred_id, dev_id)
+                            c['device'] = dev_id
+                        log.info("Kamera aktif pada device %s (Target Resolusi: %dx%d)", dev_id, c.get('width', 1920), c.get('height', 1080))
+                        return cap
+                    else:
+                        cap.release()
+            except Exception:
+                if cap is not None:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+            finally:
+                _restore_stderr(s_fd)
 
         log.warning("Kamera fisik tidak dapat dibuka pada device %s maupun alternatifnya.", preferred_id)
         return None

@@ -650,18 +650,31 @@ class TFTGuiPygame:
         self.last_update_preview = now
         frame = None
 
-        # Coba baca frame dari kamera — gunakan cap_lock agar tidak bertabrakan dengan grab_frame
-        try:
-            cap = self.app.cap
-            if cap is not None and cap.isOpened():
-                # Drain buffer lama agar tampilan selalu segar
-                for _ in range(1):
-                    cap.grab()
-                ok, frame = cap.retrieve()
-                if not ok or frame is None or frame.size == 0:
-                    frame = None
-        except Exception:
-            frame = None
+        # Coba baca frame dari kamera — sinkronkan dengan cap_lock tanpa memblokir thread GUI
+        if hasattr(self.app, 'cap_lock'):
+            acquired = self.app.cap_lock.acquire(blocking=False)
+            if not acquired:
+                # Sedang dipakai oleh grab_frame (misal memotret dokumen OCR), lewati preview frame ini
+                return
+            try:
+                cap = self.app.cap
+                if cap is not None and cap.isOpened():
+                    ok, frame = cap.read()
+                    if not ok or frame is None or frame.size == 0:
+                        frame = None
+            except Exception:
+                frame = None
+            finally:
+                self.app.cap_lock.release()
+        else:
+            try:
+                cap = self.app.cap
+                if cap is not None and cap.isOpened():
+                    ok, frame = cap.read()
+                    if not ok or frame is None or frame.size == 0:
+                        frame = None
+            except Exception:
+                frame = None
 
         if frame is None:
             # Coba buka ulang kamera jika hilang tanpa memblokir thread GUI
