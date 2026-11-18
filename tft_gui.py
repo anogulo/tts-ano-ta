@@ -123,7 +123,7 @@ class LinuxTouchReader:
     Mengonversi sinyal sentuhan mentah (ABS_X, ABS_Y) ke koordinat layar LCD (320x240)
     dan mengirim event ke antrian Pygame saat berjalan di mode direct framebuffer.
     """
-    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False):
+    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False, device_path: str = ""):
         self.width = width
         self.height = height
         self.swap_xy = swap_xy
@@ -136,25 +136,45 @@ class LinuxTouchReader:
         if not (sys.platform.startswith("linux") and HAS_EVDEV):
             return
 
-        dev_path = self._detect_device()
-        if dev_path:
+        # Jika device_path eksplisit diberikan, coba langsung
+        dev_path = device_path.strip() if device_path else None
+        if dev_path and os.path.exists(dev_path):
             try:
                 self.device = evdev.InputDevice(dev_path)
-                print(f"[GUI Touch] Terhubung ke perangkat sentuh: {self.device.name} ({dev_path})")
+                print(f"[GUI Touch] Terhubung ke device sentuh: {self.device.name} ({dev_path})")
             except Exception as e:
                 print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
+                dev_path = None
+
+        # Auto-detect jika device_path kosong atau gagal
+        if self.device is None:
+            dev_path = self._detect_device()
+            if dev_path:
+                try:
+                    self.device = evdev.InputDevice(dev_path)
+                    print(f"[GUI Touch] Terhubung ke device sentuh: {self.device.name} ({dev_path})")
+                except Exception as e:
+                    print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
 
     def _detect_device(self) -> Optional[str]:
+        """Auto-detect XPT2046/ADS7846 touch device: cek symlink dulu, lalu scan event*."""
         if os.path.exists("/dev/input/touchscreen"):
             return "/dev/input/touchscreen"
         try:
             for path in evdev.list_devices():
-                dev = evdev.InputDevice(path)
-                caps = dev.capabilities()
-                if evdev.ecodes.EV_ABS in caps:
-                    name_lower = dev.name.lower()
-                    if any(k in name_lower for k in ("touch", "ads7846", "xpt2046")):
-                        return path
+                try:
+                    dev = evdev.InputDevice(path)
+                    caps = dev.capabilities()
+                    # Device sentuh harus punya ABS_X dan ABS_Y
+                    if evdev.ecodes.EV_ABS in caps:
+                        abscodes = [a for a, _ in caps[evdev.ecodes.EV_ABS]]
+                        if evdev.ecodes.ABS_X in abscodes and evdev.ecodes.ABS_Y in abscodes:
+                            name_lower = dev.name.lower()
+                            if any(k in name_lower for k in ("touch", "ads7846", "xpt2046", "ft5406")):
+                                print(f"[GUI Touch] Auto-detect device sentuh: {dev.name} ({path})")
+                                return path
+                except Exception:
+                    continue
         except Exception:
             pass
         return None
@@ -373,14 +393,35 @@ class TFTGuiPygame:
             # Kalibrasi touch dari config.toml jika tersedia
             t_cfg = {}
             if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
+                t_cfg = self.app.cfg.get('gui', {}).get('touch', {})\
+                    if isinstance(self.app.cfg, dict) else {}
+            elif hasattr(self.app, 'cfg') and hasattr(self.app.cfg, 'get'):
+                t_cfg = {}
+
+            swap_xy = bool(t_cfg.get('swap_xy', False))
+            inv_x = bool(t_cfg.get('invert_x', False))
+            inv_y = bool(t_cfg.get('invert_y', False))
+            dev_path_touch = str(t_cfg.get('device', ''))
+
+            self.touch_reader = LinuxTouchReader(
+                width=self.width, height=self.height,
+                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
+                device_path=dev_path_touch
+            )
+            self.touch_reader.start()
+        else:
+            # Tanpa framebuffer fisik (mis. simulasi di SSH): tetap aktifkan touch reader
+            t_cfg = {}
+            if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
                 t_cfg = self.app.cfg.get('gui', {}).get('touch', {})
             swap_xy = bool(t_cfg.get('swap_xy', False))
             inv_x = bool(t_cfg.get('invert_x', False))
             inv_y = bool(t_cfg.get('invert_y', False))
-
+            dev_path_touch = str(t_cfg.get('device', ''))
             self.touch_reader = LinuxTouchReader(
                 width=self.width, height=self.height,
-                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y
+                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
+                device_path=dev_path_touch
             )
             self.touch_reader.start()
 
@@ -448,36 +489,85 @@ class TFTGuiPygame:
         return self._cached_temp
 
     def update_preview_surface(self):
-        """Membuat thumbnail kamera mini untuk pratinjau di layar 2.4 inci."""
+        """
+        Membuat thumbnail kamera mini (110x80px) untuk pratinjau live di LCD 2.4".
+        Aman terhadap kondisi kamera hilang: tampil placeholder jika frame kosong.
+        """
         now = time.time()
         if now - self.last_update_preview < 0.5:
             return
 
         self.last_update_preview = now
         frame = None
-        if self.app.cap is not None and self.app.cap.isOpened():
-            ok, frame = self.app.cap.read()
-            if not ok:
-                frame = None
+
+        # Coba baca frame dari kamera — gunakan cap_lock agar tidak bertabrakan dengan grab_frame
+        try:
+            cap = self.app.cap
+            if cap is not None and cap.isOpened():
+                # Drain buffer lama agar tampilan selalu segar
+                for _ in range(1):
+                    cap.grab()
+                ok, frame = cap.retrieve()
+                if not ok or frame is None or frame.size == 0:
+                    frame = None
+        except Exception:
+            frame = None
 
         if frame is None:
+            # Coba buka ulang kamera jika hilang tanpa memblokir thread GUI
+            if hasattr(self.app, '_preview_reconnect_at'):
+                if now < self.app._preview_reconnect_at:
+                    # Tampilkan placeholder "MENGHUBUNGKAN..."
+                    surf = pygame.Surface((110, 80))
+                    surf.fill((15, 23, 42))
+                    pygame.draw.rect(surf, (51, 65, 85), pygame.Rect(1, 1, 108, 78), border_radius=4)
+                    txt1 = self.font_stats.render("MENGHUBUNGKAN", True, self.C_WARNING)
+                    txt2 = self.font_stats.render("KAMERA...", True, self.C_TEXT_MUTED)
+                    surf.blit(txt1, ((110 - txt1.get_width()) // 2, 28))
+                    surf.blit(txt2, ((110 - txt2.get_width()) // 2, 42))
+                    self.last_preview_surface = surf
+                    return
+
+            # Jadwalkan rekoneksi berikutnya (hindari loop reconnect terus-menerus)
+            self.app._preview_reconnect_at = now + 2.0
+            try:
+                if hasattr(self.app, 'cap_lock'):
+                    with self.app.cap_lock:
+                        if self.app.cap is None or not self.app.cap.isOpened():
+                            self.app.cap = self.app._open_camera()
+                else:
+                    if self.app.cap is None or not self.app.cap.isOpened():
+                        self.app.cap = self.app._open_camera()
+            except Exception:
+                pass
+
             surf = pygame.Surface((110, 80))
-            surf.fill((20, 25, 35))
-            txt = self.font_stats.render("KAMERA READY", True, self.C_TEXT_MUTED)
-            surf.blit(txt, (14, 32))
+            surf.fill((15, 23, 42))
+            pygame.draw.rect(surf, (51, 65, 85), pygame.Rect(1, 1, 108, 78), border_radius=4)
+            txt = self.font_stats.render("KAMERA OFFLINE", True, self.C_DANGER)
+            txt2 = self.font_stats.render("MENGHUBUNGKAN", True, self.C_TEXT_MUTED)
+            surf.blit(txt, ((110 - txt.get_width()) // 2, 26))
+            surf.blit(txt2, ((110 - txt2.get_width()) // 2, 42))
             self.last_preview_surface = surf
             return
 
-        thumb = cv2.resize(frame, (110, 80), interpolation=cv2.INTER_AREA)
-        thumb_rgb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
-        thumb_rgb = np.rot90(thumb_rgb)
-        thumb_rgb = np.flipud(thumb_rgb)
-        self.last_preview_surface = pygame.surfarray.make_surface(thumb_rgb)
+        # Konversi frame BGR → RGB, resize menjadi thumbnail 110x80
+        try:
+            thumb = cv2.resize(frame, (110, 80), interpolation=cv2.INTER_AREA)
+            thumb_rgb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
+            # Rotasi 90° agar orientasi portrait sensor sesuai landscape LCD
+            thumb_rgb = np.rot90(thumb_rgb)
+            thumb_rgb = np.flipud(thumb_rgb)
+            self.last_preview_surface = pygame.surfarray.make_surface(thumb_rgb)
+        except Exception:
+            self.last_preview_surface = None
 
     def run(self):
-        """Loop utama GUI Pygame dengan responsivitas sentuhan tinggi."""
+        """Loop utama GUI Pygame dengan responsivitas sentuhan tinggi & status bar kamera."""
         self.init_display()
         self.running = True
+        # Jadwal rekoneksi kamera preview (hanya untuk GUI, bukan grab_frame)
+        self.app._preview_reconnect_at = 0.0
 
         while self.running:
             # 1. Tangani Event Sentuhan Layar & Keyboard
@@ -501,7 +591,7 @@ class TFTGuiPygame:
                         for name, btn in self.buttons.items():
                             if btn["rect"].collidepoint(pos):
                                 self.pressed_button = name
-                                self.pressed_until = time.time() + 0.18
+                                self.pressed_until = time.time() + 0.25
                                 btn["action"]()
                                 break
                 elif event.type == pygame.KEYDOWN:
@@ -524,7 +614,8 @@ class TFTGuiPygame:
                         elif event.key in (pygame.K_ESCAPE, pygame.K_q):
                             self.show_power_dialog = True
 
-            # 2. Sinkronisasi Status Mesin App
+            # 2. Sinkronisasi Status Mesin App & Indikator Kamera
+            cam_alive = (self.app.cap is not None and self.app.cap.isOpened())
             if self.app.busy:
                 if self.app.speaker.playing:
                     self.status_msg = "MEMBACA..."
@@ -532,9 +623,15 @@ class TFTGuiPygame:
                 else:
                     self.status_msg = "MEMPROSES..."
                     self.status_color = self.C_WARNING
-            elif not self.show_power_dialog and not self.status_msg.startswith("VOL:"):
-                self.status_msg = "ALAT SIAP"
-                self.status_color = self.C_PRIMARY
+            elif not self.show_power_dialog:
+                if self.status_msg.startswith("VOL:"):
+                    pass  # Biarkan pesan volume tampil sesaat
+                elif not cam_alive:
+                    self.status_msg = "CAM OFFLINE"
+                    self.status_color = self.C_DANGER
+                else:
+                    self.status_msg = "ALAT SIAP"
+                    self.status_color = self.C_PRIMARY
 
             # 3. Gambar Tampilan Layar
             self.screen.fill(self.C_BG)
@@ -563,8 +660,14 @@ class TFTGuiPygame:
                 self.screen.blit(self.last_preview_surface, (10, 34))
 
             # Info kamera & volume di bawah thumbnail
-            stats_cam = "CAM: 1080p | AF"
-            lbl_cam = self.font_stats.render(stats_cam, True, self.C_TEXT_MUTED)
+            cam_dev = self.app.cfg.get('camera', {}).get('device', '?') if isinstance(getattr(self.app, 'cfg', None), dict) else '?'
+            if cam_alive:
+                stats_cam = f"CAM:{cam_dev} 1080p"
+                cam_lbl_col = self.C_TEXT_MUTED
+            else:
+                stats_cam = f"CAM:{cam_dev} OFFLINE"
+                cam_lbl_col = self.C_DANGER
+            lbl_cam = self.font_stats.render(stats_cam, True, cam_lbl_col)
             self.screen.blit(lbl_cam, (12, 118))
 
             vol_val = self.app.volume_steps[self.app.current_vol_idx]
@@ -601,14 +704,19 @@ class TFTGuiPygame:
                 y_txt += 15
 
             # --- D. Tombol Sentuh Bawah (Tinggi 62px) ---
+            # Tombol terdisabled (abu-abu) saat busy agar tidak menerima double-click
             for name, btn in self.buttons.items():
                 r = btn["rect"]
                 col = btn["color"]
 
-                # Efek visual saat tombol disentuh
+                # Disabilkan saat sedang memproses (kecuali tombol STOP)
+                is_disabled = self.app.busy and name not in ("stop", "off")
                 is_pressed = (self.pressed_button == name and time.time() < self.pressed_until)
-                if is_pressed:
-                    col = tuple(min(255, c + 35) for c in col)
+
+                if is_disabled:
+                    col = tuple(c // 3 for c in col)
+                elif is_pressed:
+                    col = tuple(min(255, c + 40) for c in col)
 
                 label_txt = btn["label"]
                 sub_txt = btn["sub"]
@@ -616,17 +724,21 @@ class TFTGuiPygame:
                     sub_txt = f"{vol_val}%"
 
                 pygame.draw.rect(self.screen, col, r, border_radius=6)
-                border_col = (255, 255, 255, 120) if is_pressed else (255, 255, 255, 40)
-                pygame.draw.rect(self.screen, border_col, r, width=2 if is_pressed else 1, border_radius=6)
+                # Border putih tebal saat pressed, tipis saat normal
+                if is_pressed:
+                    pygame.draw.rect(self.screen, (255, 255, 255), r, width=2, border_radius=6)
+                elif not is_disabled:
+                    pygame.draw.rect(self.screen, (80, 100, 120), r, width=1, border_radius=6)
 
                 fnt = self.font_btn_lg if name == "read" else self.font_btn
-                lbl = fnt.render(label_txt, True, (255, 255, 255))
+                lbl_color = (255, 255, 255) if not is_disabled else (100, 110, 120)
+                lbl = fnt.render(label_txt, True, lbl_color)
                 lx = r.x + (r.width - lbl.get_width()) // 2
                 ly = r.y + (10 if sub_txt else (r.height - lbl.get_height()) // 2)
                 self.screen.blit(lbl, (lx, ly))
 
                 if sub_txt:
-                    sub_lbl = self.font_stats.render(sub_txt, True, (240, 240, 240))
+                    sub_lbl = self.font_stats.render(sub_txt, True, (200, 210, 220) if not is_disabled else (80, 90, 100))
                     sx = r.x + (r.width - sub_lbl.get_width()) // 2
                     self.screen.blit(sub_lbl, (sx, ly + lbl.get_height() + 3))
 
@@ -650,7 +762,8 @@ class TFTGuiPygame:
                     mr = m_btn["rect"]
                     mcol = m_btn["color"]
                     pygame.draw.rect(self.screen, mcol, mr, border_radius=6)
-                    pygame.draw.rect(self.screen, (255, 255, 255, 40), mr, width=1, border_radius=6)
+                    # Border putih solid agar tombol modal jelas di LCD kecil
+                    pygame.draw.rect(self.screen, (220, 220, 220), mr, width=1, border_radius=6)
 
                     mfnt = self.font_btn_lg if m_name == "shutdown" else self.font_btn
                     mlbl = mfnt.render(m_btn["label"], True, (255, 255, 255))
@@ -661,7 +774,7 @@ class TFTGuiPygame:
             pygame.display.flip()
             if self.fb_blitter:
                 self.fb_blitter.blit(self.screen)
-            self.clock.tick(15)
+            self.clock.tick(20)  # Naikkan ke 20 FPS agar sentuhan lebih responsif
 
         if self.touch_reader:
             self.touch_reader.stop()

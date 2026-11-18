@@ -118,6 +118,7 @@ class App:
         self.speaker = Speaker(model_path, cfg['audio']['device'])
 
         print("-> [2/3] Menginisialisasi kamera...")
+        self.cap_lock = threading.Lock()
         self.cap = cap if cap is not None else self._open_camera()
 
         # Inisialisasi GPIO (LED & Tombol) dengan proteksi pin <= 0 dan penanganan fallback
@@ -181,33 +182,53 @@ class App:
         print("-> Sistem siap!")
 
     def _open_camera(self, device_id: Optional[int] = None) -> Optional[cv2.VideoCapture]:
-        """Membuka kamera USB sesuai konfigurasi Bagian 13."""
+        """Membuka kamera USB sesuai konfigurasi Bagian 13 dengan auto-discovery & validasi stream."""
         c = cfg['camera']
-        if device_id is None:
-            device_id = c.get('device', 0)
+        preferred_id = device_id if device_id is not None else c.get('device', 0)
 
-        cap = None
-        if platform.system() == "Linux":
-            cap = cv2.VideoCapture(device_id, cv2.CAP_V4L2)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(device_id)
-        elif platform.system() == "Windows":
-            # DirectShow lebih cepat & stabil di Windows
-            cap = cv2.VideoCapture(device_id, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(device_id)
-        else:
-            cap = cv2.VideoCapture(device_id)
+        # Cari pada preferred_id terlebih dahulu, lalu coba device lain jika gagal
+        candidates = [preferred_id]
+        for alt_id in (0, 1, 2, 3):
+            if alt_id not in candidates:
+                candidates.append(alt_id)
 
-        if cap is not None and cap.isOpened():
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, c.get('width', 1920))
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, c.get('height', 1080))
-            cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-            log.info("Kamera aktif pada device %s (Target Resolusi: %dx%d)", device_id, c.get('width', 1920), c.get('height', 1080))
-        else:
-            log.warning("Kamera fisik tidak dapat dibuka pada device %s", device_id)
-        return cap
+        for dev_id in candidates:
+            cap = None
+            if platform.system() == "Linux":
+                cap = cv2.VideoCapture(dev_id, cv2.CAP_V4L2)
+                if not cap.isOpened():
+                    cap = cv2.VideoCapture(dev_id)
+            elif platform.system() == "Windows":
+                cap = cv2.VideoCapture(dev_id, cv2.CAP_DSHOW)
+                if not cap.isOpened():
+                    cap = cv2.VideoCapture(dev_id)
+            else:
+                cap = cv2.VideoCapture(dev_id)
+
+            if cap is not None and cap.isOpened():
+                try:
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, c.get('width', 1920))
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, c.get('height', 1080))
+                    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                    if hasattr(cv2, 'CAP_PROP_BUFFERSIZE'):
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
+
+                # Pastikan stream benar-benar bisa menghasilkan gambar (bukan dummy/codec device)
+                ok, test_f = cap.read()
+                if ok and test_f is not None and test_f.size > 0:
+                    if dev_id != preferred_id:
+                        log.info("Kamera dialihkan otomatis dari device %s ke device %s", preferred_id, dev_id)
+                        c['device'] = dev_id
+                    log.info("Kamera aktif pada device %s (Target Resolusi: %dx%d)", dev_id, c.get('width', 1920), c.get('height', 1080))
+                    return cap
+                else:
+                    cap.release()
+
+        log.warning("Kamera fisik tidak dapat dibuka pada device %s maupun alternatifnya.", preferred_id)
+        return None
 
     def select_camera(self):
         """Menu interaktif untuk memindai dan memilih kamera hardware yang terhubung."""
@@ -269,26 +290,27 @@ class App:
         if pilihan.isdigit():
             new_id = int(pilihan)
             print(f"\n[Kamera] Menguji dan membuka kamera indeks {new_id}...")
-            if self.cap is not None:
-                try:
-                    self.cap.release()
-                except Exception:
-                    pass
+            with self.cap_lock:
+                if self.cap is not None:
+                    try:
+                        self.cap.release()
+                    except Exception:
+                        pass
 
-            new_cap = self._open_camera(device_id=new_id)
-            if new_cap is not None and new_cap.isOpened():
-                self.cap = new_cap
-                cfg['camera']['device'] = new_id
-                save_camera_device_to_config(new_id)
-                print(f"[v] SUKSES: Kamera indeks {new_id} berhasil diaktifkan dan disimpan ke config.toml!")
+                new_cap = self._open_camera(device_id=new_id)
+                if new_cap is not None and new_cap.isOpened():
+                    self.cap = new_cap
+                    cfg['camera']['device'] = new_id
+                    save_camera_device_to_config(new_id)
+                    print(f"[v] SUKSES: Kamera indeks {new_id} berhasil diaktifkan dan disimpan ke config.toml!")
 
-                ok, test_frame = self.cap.read()
-                if ok and test_frame is not None:
-                    print_camera_snapshot(test_frame, label=f"KAMERA {new_id} AKTIF")
-            else:
-                print(f"[X] GAGAL: Kamera indeks {new_id} tidak dapat dibuka.")
-                print(f"Mencoba memulihkan kembali kamera indeks {current_dev}...")
-                self.cap = self._open_camera(device_id=current_dev)
+                    ok, test_frame = self.cap.read()
+                    if ok and test_frame is not None:
+                        print_camera_snapshot(test_frame, label=f"KAMERA {new_id} AKTIF")
+                else:
+                    print(f"[X] GAGAL: Kamera indeks {new_id} tidak dapat dibuka.")
+                    print(f"Mencoba memulihkan kembali kamera indeks {current_dev}...")
+                    self.cap = self._open_camera(device_id=current_dev)
         else:
             print("Pilihan tidak valid.")
 
@@ -402,22 +424,36 @@ class App:
     def grab_frame(self) -> Optional[cv2.Mat]:
         """
         Nyalakan LED, buang frame settle_frames untuk autofocus,
-        lalu tangkap frame gambar berkualitas penuh.
+        lalu tangkap frame gambar berkualitas penuh. Dilengkapi thread-lock & auto-reconnect.
         """
         self.led.on()
         try:
-            if self.cap is None or not self.cap.isOpened():
-                self.cap = self._open_camera()
+            with self.cap_lock:
+                for retry in range(2):
+                    if self.cap is None or not self.cap.isOpened():
+                        self.cap = self._open_camera()
 
-            if self.cap is None or not self.cap.isOpened():
+                    if self.cap is None or not self.cap.isOpened():
+                        return None
+
+                    settle = int(cfg['camera'].get('settle_frames', 8))
+                    for _ in range(settle):
+                        self.cap.read()
+
+                    ok, frame = self.cap.read()
+                    if ok and frame is not None and frame.size > 0:
+                        return frame
+
+                    # Jika pembacaan gagal, reset kamera dan coba sekali lagi
+                    log.warning("Gagal membaca frame kamera (percobaan %d/2). Menghubungkan ulang kamera...", retry + 1)
+                    try:
+                        self.cap.release()
+                    except Exception:
+                        pass
+                    self.cap = None
+                    time.sleep(0.3)
+
                 return None
-
-            settle = int(cfg['camera'].get('settle_frames', 8))
-            for _ in range(settle):
-                self.cap.read()
-
-            ok, frame = self.cap.read()
-            return frame if ok else None
         finally:
             self.led.off()
 
@@ -455,14 +491,12 @@ class App:
                 break
 
             log.warning("Quality check gagal (percobaan %d/%d): %s", attempt + 1, max_retries + 1, problem)
+            self.cue(f'gambar_{problem}', wait=True)
             if attempt < max_retries:
-                self.cue(f'gambar_{problem}', wait=True)
                 time.sleep(0.5)
-            else:
-                log.warning("Batas percobaan tercapai (%s). Mengaktifkan filter penajam citra dan tetap melanjutkan OCR...", problem)
-                break
         else:
-            log.warning("Semua percobaan quality check selesai. Melanjutkan ke OCR.")
+            log.warning("Semua percobaan quality check gagal. Proses dihentikan.")
+            return
 
         # Preprocessing & OCR
         self.cue('memproses')
