@@ -119,9 +119,9 @@ class FramebufferBlitter:
 
 class LinuxTouchReader:
     """
-    Thread pemantau input sentuh hardware Linux (XPT2046 / ADS7846) via evdev.
-    Mengonversi sinyal sentuhan mentah (ABS_X, ABS_Y) ke koordinat layar LCD (320x240)
-    dan mengirim event ke antrian Pygame saat berjalan di mode direct framebuffer.
+    Thread pemantau input sentuh hardware Linux (XPT2046 / ADS7846) via evdev dan USB Mouse via /dev/input/mice.
+    Mengonversi sinyal sentuhan ke koordinat layar LCD (320x240)
+    dan mengirim event ke antrian Pygame secara akurat tanpa deadzone.
     """
     def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False, device_path: str = ""):
         self.width = width
@@ -132,29 +132,45 @@ class LinuxTouchReader:
         self.device = None
         self.running = False
         self.thread = None
+        self.mouse_thread = None
 
-        if not (sys.platform.startswith("linux") and HAS_EVDEV):
+        # State sentuh hardware
+        self.raw_x = None
+        self.raw_y = None
+        self.is_touch_down = False
+        self.last_click_ts = 0.0
+
+        # Koordinat cursor mouse USB
+        self.cursor_x = width // 2
+        self.cursor_y = height // 2
+
+        # Rentang ADC kalibrasi XPT2046
+        self.min_adc_x = 180
+        self.max_adc_x = 3900
+        self.min_adc_y = 180
+        self.max_adc_y = 3900
+
+        if not sys.platform.startswith("linux"):
             return
 
-        # Jika device_path eksplisit diberikan, coba langsung
-        dev_path = device_path.strip() if device_path else None
-        if dev_path and os.path.exists(dev_path):
-            try:
-                self.device = evdev.InputDevice(dev_path)
-                print(f"[GUI Touch] Terhubung ke device sentuh: {self.device.name} ({dev_path})")
-            except Exception as e:
-                print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
-                dev_path = None
-
-        # Auto-detect jika device_path kosong atau gagal
-        if self.device is None:
-            dev_path = self._detect_device()
-            if dev_path:
+        if HAS_EVDEV:
+            dev_path = device_path.strip() if device_path else None
+            if dev_path and os.path.exists(dev_path):
                 try:
                     self.device = evdev.InputDevice(dev_path)
                     print(f"[GUI Touch] Terhubung ke device sentuh: {self.device.name} ({dev_path})")
                 except Exception as e:
                     print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
+                    dev_path = None
+
+            if self.device is None:
+                dev_path = self._detect_device()
+                if dev_path:
+                    try:
+                        self.device = evdev.InputDevice(dev_path)
+                        print(f"[GUI Touch] Auto-detect device sentuh: {self.device.name} ({dev_path})")
+                    except Exception as e:
+                        print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
 
     def _detect_device(self) -> Optional[str]:
         """Auto-detect XPT2046/ADS7846 touch device: cek symlink dulu, lalu scan event*."""
@@ -165,13 +181,11 @@ class LinuxTouchReader:
                 try:
                     dev = evdev.InputDevice(path)
                     caps = dev.capabilities()
-                    # Device sentuh harus punya ABS_X dan ABS_Y
                     if evdev.ecodes.EV_ABS in caps:
                         abscodes = [a for a, _ in caps[evdev.ecodes.EV_ABS]]
                         if evdev.ecodes.ABS_X in abscodes and evdev.ecodes.ABS_Y in abscodes:
                             name_lower = dev.name.lower()
                             if any(k in name_lower for k in ("touch", "ads7846", "xpt2046", "ft5406")):
-                                print(f"[GUI Touch] Auto-detect device sentuh: {dev.name} ({path})")
                                 return path
                 except Exception:
                     continue
@@ -180,46 +194,99 @@ class LinuxTouchReader:
         return None
 
     def start(self):
-        if self.device and not self.running:
+        if not self.running:
             self.running = True
-            self.thread = threading.Thread(target=self._read_loop, daemon=True)
-            self.thread.start()
+            if self.device:
+                self.thread = threading.Thread(target=self._touch_loop, daemon=True)
+                self.thread.start()
+            # Listener mouse USB /dev/input/mice agar mouse USB bisa digunakan langsung
+            if os.path.exists("/dev/input/mice"):
+                self.mouse_thread = threading.Thread(target=self._mouse_loop, daemon=True)
+                self.mouse_thread.start()
 
-    def _read_loop(self):
-        raw_x = 0
-        raw_y = 0
-        min_adc_x, max_adc_x = 180, 3920
-        min_adc_y, max_adc_y = 180, 3920
+    def _calc_screen_coords(self) -> Tuple[int, int]:
+        if self.raw_x is None or self.raw_y is None:
+            return self.cursor_x, self.cursor_y
+
+        span_x = max(1, self.max_adc_x - self.min_adc_x)
+        span_y = max(1, self.max_adc_y - self.min_adc_y)
+        nx = max(0.0, min(1.0, (self.raw_x - self.min_adc_x) / span_x))
+        ny = max(0.0, min(1.0, (self.raw_y - self.min_adc_y) / span_y))
+
+        if self.swap_xy:
+            nx, ny = ny, nx
+        if self.invert_x:
+            nx = 1.0 - nx
+        if self.invert_y:
+            ny = 1.0 - ny
+
+        px = int(nx * self.width)
+        py = int(ny * self.height)
+        return max(0, min(self.width - 1, px)), max(0, min(self.height - 1, py))
+
+    def _post_click(self, px: int, py: int):
+        if not HAS_PYGAME:
+            return
+        now = time.time()
+        if now - self.last_click_ts < 0.22:
+            return
+        self.last_click_ts = now
+        print(f"[GUI Input] Klik/Sentuh terkirim ke Pygame: ({px}, {py})")
+        evt = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (px, py), "button": 1})
+        pygame.event.post(evt)
+
+    def _touch_loop(self):
         try:
             for event in self.device.read_loop():
                 if not self.running:
                     break
+
                 if event.type == evdev.ecodes.EV_ABS:
                     if event.code == evdev.ecodes.ABS_X:
-                        raw_x = event.value
+                        self.raw_x = event.value
                     elif event.code == evdev.ecodes.ABS_Y:
-                        raw_y = event.value
+                        self.raw_y = event.value
+
                 elif event.type == evdev.ecodes.EV_KEY:
                     if event.code in (evdev.ecodes.BTN_TOUCH, evdev.ecodes.BTN_LEFT):
-                        if event.value == 1 and HAS_PYGAME:
-                            nx = (raw_x - min_adc_x) / max(1, (max_adc_x - min_adc_x))
-                            ny = (raw_y - min_adc_y) / max(1, (max_adc_y - min_adc_y))
-                            nx = max(0.0, min(1.0, nx))
-                            ny = max(0.0, min(1.0, ny))
+                        if event.value == 1:
+                            self.is_touch_down = True
+                        elif event.value == 0:
+                            if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
+                                self.is_touch_down = False
+                                px, py = self._calc_screen_coords()
+                                self._post_click(px, py)
 
-                            if self.swap_xy:
-                                nx, ny = ny, nx
-                            if self.invert_x:
-                                nx = 1.0 - nx
-                            if self.invert_y:
-                                ny = 1.0 - ny
+                elif event.type == evdev.ecodes.EV_SYN and getattr(evdev.ecodes, 'SYN_REPORT', 0) == event.code:
+                    if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
+                        px, py = self._calc_screen_coords()
+                        self._post_click(px, py)
 
-                            px = int(nx * self.width)
-                            py = int(ny * self.height)
-                            px = max(0, min(self.width - 1, px))
-                            py = max(0, min(self.height - 1, py))
-                            evt = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (px, py), "button": 1})
-                            pygame.event.post(evt)
+        except Exception as e:
+            print(f"[GUI Touch] Touch loop selesai/berhenti: {e}")
+
+    def _mouse_loop(self):
+        """Membaca mouse USB fisik melalui /dev/input/mice tanpa bergantung evdev."""
+        try:
+            with open("/dev/input/mice", "rb") as mf:
+                print("[GUI Mouse] Listener mouse USB aktif pada /dev/input/mice")
+                while self.running:
+                    buf = mf.read(3)
+                    if not buf or len(buf) < 3:
+                        continue
+                    btn_byte = buf[0]
+                    dx = buf[1]
+                    dy = buf[2]
+                    if dx >= 128:
+                        dx -= 256
+                    if dy >= 128:
+                        dy -= 256
+
+                    self.cursor_x = max(0, min(self.width - 1, self.cursor_x + dx))
+                    self.cursor_y = max(0, min(self.height - 1, self.cursor_y - dy))
+
+                    if (btn_byte & 1) != 0:
+                        self._post_click(self.cursor_x, self.cursor_y)
         except Exception:
             pass
 
@@ -434,31 +501,67 @@ class TFTGuiPygame:
         self.font_stats = pygame.font.SysFont("monospace,consolas", 9)
 
     def _action_read(self):
+        print("[GUI Action] Tombol BACA dipicu.")
         if not self.app.busy:
             self.status_msg = "MEMOTRET..."
             self.status_color = self.C_WARNING
             self.app._run_async(self.app.capture_and_read)
+        else:
+            print("[GUI Action] Sistem sedang sibuk.")
 
     def _action_replay(self):
-        if not self.app.busy:
-            self.status_msg = "MEMUTAR ULANG..."
-            self.status_color = self.C_INFO
-            self.app._run_async(self.app.replay)
+        print("[GUI Action] Tombol ULANG dipicu.")
+        # Jika sedang memutar bacaan lama, stop dulu seketika
+        if self.app.speaker.playing:
+            self.app.speaker.stop()
+            time.sleep(0.08)
+        self.app.busy = False
+        self.status_msg = "MEMUTAR ULANG..."
+        self.status_color = self.C_INFO
+        self.app._run_async(self.app.replay)
 
     def _action_stop(self):
+        print("[GUI Action] Tombol STOP dipicu.")
         self.app.speaker.stop()
+        self.app.busy = False
         self.status_msg = "SUARA DISTOP"
         self.status_color = self.C_TEXT_MUTED
 
     def _action_vol(self):
-        """Ubah volume audio secara siklis dan tampilkan nilai barunya."""
-        self.app._run_async(self.app.cycle_volume)
-        idx = (self.app.current_vol_idx + 1) % len(self.app.volume_steps)
-        self.status_msg = f"VOL: {self.app.volume_steps[idx]}%"
+        print("[GUI Action] Tombol VOL dipicu.")
+        # Siklus volume langsung tanpa lewat _run_async agar tidak terhambat saat busy
+        self.app.current_vol_idx = (self.app.current_vol_idx + 1) % len(self.app.volume_steps)
+        new_vol = self.app.volume_steps[self.app.current_vol_idx]
+        self.status_msg = f"VOL: {new_vol}%"
         self.status_color = self.C_ACCENT
+        threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+
+    def _apply_volume_hardware(self, vol_percent: int):
+        if sys.platform.startswith("linux"):
+            mixer = "Headphone"
+            card = "2"
+            if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
+                mixer = self.app.cfg.get('audio', {}).get('mixer', 'Headphone')
+                dev = self.app.cfg.get('audio', {}).get('device', 'plughw:2,0')
+                if ':' in dev and ',' in dev:
+                    try:
+                        card = dev.split(':')[1].split(',')[0]
+                    except Exception:
+                        card = '2'
+            try:
+                subprocess.run(
+                    ['amixer', '-c', card, 'sset', mixer, f"{vol_percent}%"],
+                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except Exception:
+                pass
+        try:
+            self.app.cue('klik')
+        except Exception:
+            pass
 
     def _action_shutdown(self):
-        """Buka dialog konfirmasi aman untuk mencegah salah sentuh saat membaca."""
+        print("[GUI Action] Tombol OFF dipicu -> Buka dialog konfirmasi daya.")
         self.show_power_dialog = True
 
     def _confirm_shutdown(self):
@@ -580,20 +683,72 @@ class TFTGuiPygame:
                     else:
                         pos = (int(event.x * self.width), int(event.y * self.height))
 
+                    px, py = pos
+                    print(f"[GUI Event] Klik/Sentuh terdeteksi di layar pada koordinat ({px}, {py})")
+
                     if self.show_power_dialog:
                         # Event klik pada modal dialog daya
-                        for name, btn in self.modal_buttons.items():
-                            if btn["rect"].collidepoint(pos):
-                                btn["action"]()
-                                break
+                        if 70 <= py <= 118 and 35 <= px <= 285:
+                            print("[GUI Event] Klik -> MATIKAN PI")
+                            self._confirm_shutdown()
+                        elif 120 <= py <= 165 and 35 <= px < 160:
+                            print("[GUI Event] Klik -> MENU UTAMA")
+                            self._confirm_exit_gui()
+                        elif 120 <= py <= 165 and 160 <= px <= 285:
+                            print("[GUI Event] Klik -> BATAL")
+                            self._cancel_dialog()
+                        else:
+                            for name, btn in self.modal_buttons.items():
+                                if btn["rect"].collidepoint(pos):
+                                    btn["action"]()
+                                    break
                     else:
-                        # Event klik tombol utama baris bawah
-                        for name, btn in self.buttons.items():
-                            if btn["rect"].collidepoint(pos):
-                                self.pressed_button = name
+                        # 1. Baris tombol utama bawah (y >= 160) dengan toleransi kolom tanpa celah mati
+                        if py >= 160:
+                            if px < 102:
+                                print("[GUI Event] Klik -> BACA")
+                                self.pressed_button = "read"
                                 self.pressed_until = time.time() + 0.25
-                                btn["action"]()
-                                break
+                                self._action_read()
+                            elif px < 158:
+                                print("[GUI Event] Klik -> ULANG")
+                                self.pressed_button = "replay"
+                                self.pressed_until = time.time() + 0.25
+                                self._action_replay()
+                            elif px < 212:
+                                print("[GUI Event] Klik -> STOP")
+                                self.pressed_button = "stop"
+                                self.pressed_until = time.time() + 0.25
+                                self._action_stop()
+                            elif px < 266:
+                                print("[GUI Event] Klik -> VOL")
+                                self.pressed_button = "vol"
+                                self.pressed_until = time.time() + 0.25
+                                self._action_vol()
+                            else:
+                                print("[GUI Event] Klik -> OFF")
+                                self.pressed_button = "off"
+                                self.pressed_until = time.time() + 0.25
+                                self._action_shutdown()
+
+                        # 2. Sentuhan pada kartu thumbnail kamera (y < 160, x < 125) -> BACA
+                        elif 28 <= py < 160 and px < 125:
+                            print("[GUI Event] Klik Thumbnail Kamera -> BACA")
+                            self.pressed_button = "read"
+                            self.pressed_until = time.time() + 0.25
+                            self._action_read()
+
+                        # 3. Sentuhan pada kartu teks bacaan (y < 160, x >= 125) -> ULANG
+                        elif 28 <= py < 160 and px >= 125:
+                            print("[GUI Event] Klik Kartu Teks -> ULANG")
+                            self.pressed_button = "replay"
+                            self.pressed_until = time.time() + 0.25
+                            self._action_replay()
+
+                        # 4. Sentuhan pada status/volume bar atas -> VOL
+                        elif py < 28 and px > 200:
+                            print("[GUI Event] Klik Status Bar -> VOL")
+                            self._action_vol()
                 elif event.type == pygame.KEYDOWN:
                     if self.show_power_dialog:
                         if event.key in (pygame.K_ESCAPE, pygame.K_b):
