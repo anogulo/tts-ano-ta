@@ -124,8 +124,14 @@ class App:
 
         # Inisialisasi GPIO (LED & Tombol) dengan proteksi pin <= 0 dan penanganan fallback
         led_pin = int(cfg['gpio'].get('led', 0))
-        btn_main_pin = int(cfg['gpio'].get('btn_main', 23))
+        btn_main_pin = int(cfg['gpio'].get('btn_main', 0))
         btn_aux_pin = int(cfg['gpio'].get('btn_aux', 0))
+
+        # Proteksi otomatis jika GUI LCD aktif: cegah konflik pin GPIO dengan LCD SPI & Touch IRQ (XPT2046)
+        gui_cfg = cfg.get('gui', {})
+        if gui_cfg.get('enabled', False) and btn_main_pin in (22, 23, 24, 25, 27):
+            log.info("GUI LCD aktif: GPIO btn_main (pin %s) dinonaktifkan otomatis untuk mencegah konflik dengan Touch IRQ LCD.", btn_main_pin)
+            btn_main_pin = 0
 
         if HAS_GPIO and led_pin > 0:
             try:

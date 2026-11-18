@@ -515,6 +515,17 @@ class TFTGuiPygame:
         self.font_text = pygame.font.SysFont("dejavusans,arial,helvetica", 10)
         self.font_stats = pygame.font.SysFont("monospace,consolas", 9)
 
+        # Nonaktifkan listener tombol GPIO fisik jika berpotensi terpicu oleh sinyal Touch IRQ LCD
+        if hasattr(self.app, 'btn_main') and hasattr(self.app.btn_main, 'when_released'):
+            try:
+                if not type(self.app.btn_main).__name__.startswith('Mock'):
+                    print("[GUI] Mengamankan listener GPIO btn_main dari interferensi Touch IRQ LCD.")
+                    self.app.btn_main.when_released = None
+                    self.app.btn_main.when_pressed = None
+                    self.app.btn_main.when_held = None
+            except Exception:
+                pass
+
     def _action_read(self):
         print("[GUI Action] Tombol BACA dipicu.")
         if not self.app.busy:

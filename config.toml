@@ -25,7 +25,7 @@ mixer = "Headphone"      # mixer kontrol untuk bcm2835 Headphones
 volume_steps = [40, 60, 80, 100]
 
 [gpio]
-btn_main = 23            # Pin Fisik 16 (GPIO23) - Tombol Utama Fisik (Opsional jika pakai GUI)
+btn_main = 0            # Diset 0 (Nonaktif) jika memakai GUI LCD SPI karena Pin 16 / GPIO23 berbenturan dengan Touch IRQ
 btn_aux = 0              # Diset 0 (Nonaktif) karena Pin 13 / GPIO27 dipakai LCD RESET
 led = 0                  # Diset 0 (Nonaktif) karena Pin 15 / GPIO22 dipakai LCD DC, backlight sudah ke 3.3V Pin 17
 
