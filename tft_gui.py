@@ -123,7 +123,7 @@ class LinuxTouchReader:
     Mengonversi sinyal sentuhan ke koordinat layar LCD (320x240)
     dan mengirim event ke antrian Pygame secara akurat tanpa deadzone.
     """
-    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = True, invert_x: bool = False, invert_y: bool = True, device_path: str = ""):
+    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False, device_path: str = ""):
         self.width = width
         self.height = height
         self.swap_xy = swap_xy
@@ -256,9 +256,6 @@ class LinuxTouchReader:
                                 self.is_touch_down = False
                                 px, py = self._calc_screen_coords()
                                 self._post_click(px, py)
-                            self.is_touch_down = False
-                            self.raw_x = None
-                            self.raw_y = None
 
                 elif event.type == evdev.ecodes.EV_SYN and getattr(evdev.ecodes, 'SYN_REPORT', 0) == event.code:
                     if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
@@ -346,8 +343,6 @@ class TFTGuiPygame:
         self.show_power_dialog = False
         self.pressed_button = None
         self.pressed_until = 0.0
-        self.last_touch_pos = None
-        self.last_touch_time = 0.0
         self._last_temp_check = 0.0
         self._cached_temp = ""
 
@@ -515,17 +510,6 @@ class TFTGuiPygame:
         self.font_text = pygame.font.SysFont("dejavusans,arial,helvetica", 10)
         self.font_stats = pygame.font.SysFont("monospace,consolas", 9)
 
-        # Nonaktifkan listener tombol GPIO fisik jika berpotensi terpicu oleh sinyal Touch IRQ LCD
-        if hasattr(self.app, 'btn_main') and hasattr(self.app.btn_main, 'when_released'):
-            try:
-                if not type(self.app.btn_main).__name__.startswith('Mock'):
-                    print("[GUI] Mengamankan listener GPIO btn_main dari interferensi Touch IRQ LCD.")
-                    self.app.btn_main.when_released = None
-                    self.app.btn_main.when_pressed = None
-                    self.app.btn_main.when_held = None
-            except Exception:
-                pass
-
     def _action_read(self):
         print("[GUI Action] Tombol BACA dipicu.")
         if not self.app.busy:
@@ -650,31 +634,18 @@ class TFTGuiPygame:
         self.last_update_preview = now
         frame = None
 
-        # Coba baca frame dari kamera — sinkronkan dengan cap_lock tanpa memblokir thread GUI
-        if hasattr(self.app, 'cap_lock'):
-            acquired = self.app.cap_lock.acquire(blocking=False)
-            if not acquired:
-                # Sedang dipakai oleh grab_frame (misal memotret dokumen OCR), lewati preview frame ini
-                return
-            try:
-                cap = self.app.cap
-                if cap is not None and cap.isOpened():
-                    ok, frame = cap.read()
-                    if not ok or frame is None or frame.size == 0:
-                        frame = None
-            except Exception:
-                frame = None
-            finally:
-                self.app.cap_lock.release()
-        else:
-            try:
-                cap = self.app.cap
-                if cap is not None and cap.isOpened():
-                    ok, frame = cap.read()
-                    if not ok or frame is None or frame.size == 0:
-                        frame = None
-            except Exception:
-                frame = None
+        # Coba baca frame dari kamera — gunakan cap_lock agar tidak bertabrakan dengan grab_frame
+        try:
+            cap = self.app.cap
+            if cap is not None and cap.isOpened():
+                # Drain buffer lama agar tampilan selalu segar
+                for _ in range(1):
+                    cap.grab()
+                ok, frame = cap.retrieve()
+                if not ok or frame is None or frame.size == 0:
+                    frame = None
+        except Exception:
+            frame = None
 
         if frame is None:
             # Coba buka ulang kamera jika hilang tanpa memblokir thread GUI
@@ -744,8 +715,6 @@ class TFTGuiPygame:
                         pos = (int(event.x * self.width), int(event.y * self.height))
 
                     px, py = pos
-                    self.last_touch_pos = (px, py)
-                    self.last_touch_time = time.time()
                     print(f"[GUI Event] Klik/Sentuh terdeteksi di layar pada koordinat ({px}, {py})")
 
                     if self.show_power_dialog:
@@ -968,11 +937,6 @@ class TFTGuiPygame:
                     mlx = mr.x + (mr.width - mlbl.get_width()) // 2
                     mly = mr.y + (mr.height - mlbl.get_height()) // 2
                     self.screen.blit(mlbl, (mlx, mly))
-
-            # Feedback visual titik sentuhan sesaat di layar
-            if self.last_touch_pos and (time.time() - self.last_touch_time < 0.6):
-                pygame.draw.circle(self.screen, (255, 255, 255), self.last_touch_pos, 6, 2)
-                pygame.draw.circle(self.screen, (250, 204, 21), self.last_touch_pos, 3)
 
             pygame.display.flip()
             if self.fb_blitter:
