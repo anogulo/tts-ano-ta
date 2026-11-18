@@ -352,46 +352,61 @@ class TFTGuiPygame:
         self._init_buttons()
 
     def _init_buttons(self):
-        """Mendefinisikan area dan aksi tombol sentuh (dioptimalkan untuk sentuhan jari 2.4 inch)."""
+        """Mendefinisikan area dan aksi tombol sentuh dengan border terpisah (dioptimalkan untuk sentuhan 2.4 inch)."""
         rect_factory = pygame.Rect if HAS_PYGAME else SimpleRect
-        # 5 Tombol Sentuh Baris Bawah (Tinggi 62px untuk kenyamanan sentuhan jari pada layar 2.4")
+        # 6 Tombol Sentuh Baris Bawah dengan border independen (jarak 4px antar border)
         self.buttons = {
             "read": {
-                "rect": rect_factory(6, 172, 94, 62),
+                "rect": rect_factory(6, 170, 64, 64),
                 "label": "BACA",
-                "sub": "FOTO & OCR",
-                "color": self.C_PRIMARY,
+                "sub": "FOTO",
+                "color": (16, 185, 129),
+                "border_color": (52, 211, 153),
                 "action": self._action_read
             },
             "replay": {
-                "rect": rect_factory(104, 172, 52, 62),
+                "rect": rect_factory(74, 170, 44, 64),
                 "label": "ULANG",
-                "sub": "REPLAY",
-                "color": self.C_INFO,
+                "sub": "PUTAR",
+                "color": (37, 99, 235),
+                "border_color": (96, 165, 250),
                 "action": self._action_replay
             },
             "stop": {
-                "rect": rect_factory(160, 172, 50, 62),
+                "rect": rect_factory(122, 170, 44, 64),
                 "label": "STOP",
-                "sub": "AUDIO",
-                "color": self.C_WARNING,
+                "sub": "SUARA",
+                "color": (217, 119, 6),
+                "border_color": (251, 191, 36),
                 "action": self._action_stop
             },
-            "vol": {
-                "rect": rect_factory(214, 172, 50, 62),
-                "label": "VOL",
-                "sub": "80%",
-                "color": self.C_ACCENT,
-                "action": self._action_vol
+            "vol_dn": {
+                "rect": rect_factory(170, 170, 44, 64),
+                "label": "VOL -",
+                "sub": "TURUN",
+                "color": (14, 165, 233),
+                "border_color": (56, 189, 248),
+                "action": self._action_vol_down
+            },
+            "vol_up": {
+                "rect": rect_factory(218, 170, 44, 64),
+                "label": "VOL +",
+                "sub": "NAIK",
+                "color": (2, 132, 199),
+                "border_color": (56, 189, 248),
+                "action": self._action_vol_up
             },
             "off": {
-                "rect": rect_factory(268, 172, 46, 62),
+                "rect": rect_factory(266, 170, 48, 64),
                 "label": "OFF",
-                "sub": "POWER",
-                "color": self.C_DANGER,
+                "sub": "DAYA",
+                "color": (220, 38, 38),
+                "border_color": (248, 113, 113),
                 "action": self._action_shutdown
             }
         }
+        # Alias backward-compatibility untuk referensi ke "vol"
+        self.buttons["vol"] = self.buttons["vol_up"]
 
         # Tombol Modal Dialog Konfirmasi Daya / Keluar
         self.modal_buttons = {
@@ -507,7 +522,7 @@ class TFTGuiPygame:
     def _action_replay(self):
         print("[GUI Action] Tombol ULANG dipicu.")
         # Jika sedang memutar bacaan lama, stop dulu seketika
-        if self.app.speaker.playing:
+        if getattr(self.app.speaker, 'playing', False) is True:
             self.app.speaker.stop()
             time.sleep(0.08)
         self.app.busy = False
@@ -522,14 +537,35 @@ class TFTGuiPygame:
         self.status_msg = "SUARA DISTOP"
         self.status_color = self.C_TEXT_MUTED
 
+    def _action_vol_down(self):
+        print("[GUI Action] Tombol VOL - dipicu.")
+        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+            self.app.current_vol_idx = max(0, self.app.current_vol_idx - 1)
+            new_vol = self.app.volume_steps[self.app.current_vol_idx]
+            self.status_msg = f"VOL: {new_vol}%"
+            self.status_color = self.C_ACCENT
+            threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+
+    def _action_vol_up(self):
+        print("[GUI Action] Tombol VOL + dipicu.")
+        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+            self.app.current_vol_idx = min(len(self.app.volume_steps) - 1, self.app.current_vol_idx + 1)
+            new_vol = self.app.volume_steps[self.app.current_vol_idx]
+            self.status_msg = f"VOL: {new_vol}%"
+            self.status_color = self.C_ACCENT
+            threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+
     def _action_vol(self):
+        """Siklus volume (kompatibilitas tombol fisik / tes unit)."""
         print("[GUI Action] Tombol VOL dipicu.")
-        # Siklus volume langsung tanpa lewat _run_async agar tidak terhambat saat busy
-        self.app.current_vol_idx = (self.app.current_vol_idx + 1) % len(self.app.volume_steps)
-        new_vol = self.app.volume_steps[self.app.current_vol_idx]
-        self.status_msg = f"VOL: {new_vol}%"
-        self.status_color = self.C_ACCENT
-        threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+            self.app.current_vol_idx = (self.app.current_vol_idx + 1) % len(self.app.volume_steps)
+            new_vol = self.app.volume_steps[self.app.current_vol_idx]
+            self.status_msg = f"VOL: {new_vol}%"
+            self.status_color = self.C_ACCENT
+            threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+        elif hasattr(self.app, '_run_async') and hasattr(self.app, 'cycle_volume'):
+            self.app._run_async(self.app.cycle_volume)
 
     def _apply_volume_hardware(self, vol_percent: int):
         if sys.platform.startswith("linux"):
@@ -701,8 +737,10 @@ class TFTGuiPygame:
                         # Cek setiap tombol utama di baris bawah dengan toleransi padding
                         handled = False
                         for name, btn in self.buttons.items():
-                            # Perluas area klik (+8px lebar, +8px tinggi) agar ramah sentuhan jari
-                            hit_rect = btn["rect"].inflate(8, 8)
+                            if name == "vol":
+                                continue
+                            # Batasi padding ke 4px agar tidak tumpang tindih ke tombol tetangga
+                            hit_rect = btn["rect"].inflate(4, 4)
                             if hit_rect.collidepoint(pos):
                                 print(f"[GUI Event] Tombol [{btn['label']}] DITEKAN pada koordinat ({px}, {py})")
                                 self.pressed_button = name
@@ -728,6 +766,10 @@ class TFTGuiPygame:
                             self._action_replay()
                         elif event.key == pygame.K_s:
                             self._action_stop()
+                        elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_DOWN):
+                            self._action_vol_down()
+                        elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS, pygame.K_UP):
+                            self._action_vol_up()
                         elif event.key == pygame.K_v:
                             self._action_vol()
                         elif event.key in (pygame.K_ESCAPE, pygame.K_q):
@@ -822,32 +864,37 @@ class TFTGuiPygame:
                 self.screen.blit(l_surf, (134, y_txt))
                 y_txt += 15
 
-            # --- D. Tombol Sentuh Bawah (Tinggi 62px) ---
-            # Tombol terdisabled (abu-abu) saat busy agar tidak menerima double-click
+            # --- D. Tombol Sentuh Bawah dengan Border Terpisah (Tinggi 64px) ---
             for name, btn in self.buttons.items():
+                if name == "vol":
+                    continue
                 r = btn["rect"]
                 col = btn["color"]
+                border_col = btn.get("border_color", (80, 100, 120))
 
-                # Disabilkan saat sedang memproses (kecuali tombol STOP)
-                is_disabled = self.app.busy and name not in ("stop", "off")
+                # Tombol tetap aktif saat memproses jika bukan BACA/REPLAY
+                is_disabled = self.app.busy and name not in ("stop", "vol_dn", "vol_up", "off")
                 is_pressed = (self.pressed_button == name and time.time() < self.pressed_until)
 
                 if is_disabled:
                     col = tuple(c // 3 for c in col)
+                    border_col = (51, 65, 85)
                 elif is_pressed:
                     col = tuple(min(255, c + 40) for c in col)
 
                 label_txt = btn["label"]
                 sub_txt = btn["sub"]
-                if name == "vol":
-                    sub_txt = f"{vol_val}%"
 
+                # 1. Gambar latar tombol independen
                 pygame.draw.rect(self.screen, col, r, border_radius=6)
-                # Border putih tebal saat pressed, tipis saat normal
+
+                # 2. Gambar border terpisah (tebal 2px) dengan warna khas tiap tombol
                 if is_pressed:
                     pygame.draw.rect(self.screen, (255, 255, 255), r, width=2, border_radius=6)
                 elif not is_disabled:
-                    pygame.draw.rect(self.screen, (80, 100, 120), r, width=1, border_radius=6)
+                    pygame.draw.rect(self.screen, border_col, r, width=2, border_radius=6)
+                else:
+                    pygame.draw.rect(self.screen, border_col, r, width=1, border_radius=6)
 
                 fnt = self.font_btn_lg if name == "read" else self.font_btn
                 lbl_color = (255, 255, 255) if not is_disabled else (100, 110, 120)
@@ -857,7 +904,8 @@ class TFTGuiPygame:
                 self.screen.blit(lbl, (lx, ly))
 
                 if sub_txt:
-                    sub_lbl = self.font_stats.render(sub_txt, True, (200, 210, 220) if not is_disabled else (80, 90, 100))
+                    sub_col = (220, 230, 242) if not is_disabled else (80, 90, 100)
+                    sub_lbl = self.font_stats.render(sub_txt, True, sub_col)
                     sx = r.x + (r.width - sub_lbl.get_width()) // 2
                     self.screen.blit(sub_lbl, (sx, ly + lbl.get_height() + 3))
 
@@ -954,23 +1002,49 @@ class TFTGuiTkinter:
 
         # Tombol Frame
         btn_box = tk.Frame(self.root, bg="#0f172a")
-        btn_box.pack(fill="x", padx=8, pady=6)
+        btn_box.pack(fill="x", padx=4, pady=6)
 
-        btn_read = tk.Button(btn_box, text="📷 BACA", bg="#10b981", fg="white", font=("Helvetica", 10, "bold"),
-                             command=lambda: self.app._run_async(self.app.capture_and_read), height=2, width=8)
+        btn_read = tk.Button(btn_box, text="📷 BACA", bg="#10b981", fg="white", font=("Helvetica", 9, "bold"),
+                             relief="raised", bd=2,
+                             command=lambda: self.app._run_async(self.app.capture_and_read), height=2, width=6)
         btn_read.pack(side="left", padx=2)
 
-        btn_replay = tk.Button(btn_box, text="🔄 ULANG", bg="#3b82f6", fg="white", font=("Helvetica", 9, "bold"),
-                              command=lambda: self.app._run_async(self.app.replay), height=2, width=7)
+        btn_replay = tk.Button(btn_box, text="🔄 ULANG", bg="#2563eb", fg="white", font=("Helvetica", 9, "bold"),
+                              relief="raised", bd=2,
+                              command=lambda: self.app._run_async(self.app.replay), height=2, width=6)
         btn_replay.pack(side="left", padx=2)
 
-        btn_stop = tk.Button(btn_box, text="⏹ STOP", bg="#f59e0b", fg="white", font=("Helvetica", 9, "bold"),
-                            command=self.app.speaker.stop, height=2, width=6)
+        btn_stop = tk.Button(btn_box, text="⏹ STOP", bg="#d97706", fg="white", font=("Helvetica", 9, "bold"),
+                             relief="raised", bd=2,
+                             command=self.app.speaker.stop, height=2, width=5)
         btn_stop.pack(side="left", padx=2)
 
-        btn_vol = tk.Button(btn_box, text="🔊 VOL", bg="#475569", fg="white", font=("Helvetica", 9),
-                            command=lambda: self.app._run_async(self.app.cycle_volume), height=2, width=5)
-        btn_vol.pack(side="left", padx=2)
+        def tk_vol_down():
+            if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+                self.app.current_vol_idx = max(0, self.app.current_vol_idx - 1)
+                nv = self.app.volume_steps[self.app.current_vol_idx]
+                self.lbl_status.config(text=f"VOL: {nv}%", fg="#0ea5e9")
+
+        def tk_vol_up():
+            if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+                self.app.current_vol_idx = min(len(self.app.volume_steps) - 1, self.app.current_vol_idx + 1)
+                nv = self.app.volume_steps[self.app.current_vol_idx]
+                self.lbl_status.config(text=f"VOL: {nv}%", fg="#0ea5e9")
+
+        btn_vol_dn = tk.Button(btn_box, text="🔉 -", bg="#0ea5e9", fg="white", font=("Helvetica", 9, "bold"),
+                               relief="raised", bd=2,
+                               command=tk_vol_down, height=2, width=4)
+        btn_vol_dn.pack(side="left", padx=2)
+
+        btn_vol_up = tk.Button(btn_box, text="🔊 +", bg="#0284c7", fg="white", font=("Helvetica", 9, "bold"),
+                               relief="raised", bd=2,
+                               command=tk_vol_up, height=2, width=4)
+        btn_vol_up.pack(side="left", padx=2)
+
+        btn_off = tk.Button(btn_box, text="⏻ OFF", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"),
+                            relief="raised", bd=2,
+                            command=self.app.safe_shutdown, height=2, width=4)
+        btn_off.pack(side="left", padx=2)
 
         # Timer pemantau status
         def sync_loop():
