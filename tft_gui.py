@@ -300,42 +300,80 @@ class LinuxTouchReader:
         pygame.event.post(evt)
 
     def _touch_loop(self):
+        """
+        Loop baca event sentuh dari evdev.
+        Strategi: Kumpulkan koordinat X/Y selama jari menekan.
+        Kirim klik (post event) HANYA saat jari DIANGKAT (BTN_TOUCH=0 atau ABS_PRESSURE=0).
+        Ini mencegah klik ganda saat jari masih di layar dan memastikan
+        koordinat yang dikirim adalah posisi AKHIR sebelum diangkat.
+        Fallback: EV_SYN hanya dipakai jika device tidak mengirim BTN_TOUCH/PRESSURE.
+        """
         try:
             print(f"[GUI Touch] Touch loop aktif membaca dari {self.device.name} ({self.device.path})...", flush=True)
+
+            # Deteksi apakah device mengirim BTN_TOUCH atau ABS_PRESSURE (ada release event)
+            has_btn_touch = False
+            has_pressure = False
+            try:
+                caps = self.device.capabilities()
+                ev_key_codes = [c for c, _ in caps.get(evdev.ecodes.EV_KEY, [])]
+                has_btn_touch = evdev.ecodes.BTN_TOUCH in ev_key_codes
+                abs_codes = [c for c, _ in caps.get(evdev.ecodes.EV_ABS, [])]
+                has_pressure = getattr(evdev.ecodes, 'ABS_PRESSURE', 24) in abs_codes
+            except Exception:
+                pass
+
+            use_syn_fallback = not has_btn_touch and not has_pressure
+            print(f"[GUI Touch] has_btn_touch={has_btn_touch}, has_pressure={has_pressure}, syn_fallback={use_syn_fallback}", flush=True)
+
+            last_syn_x = None
+            last_syn_y = None
+
             for event in self.device.read_loop():
                 if not self.running:
                     break
 
-                # Tangani koordinat X & Y
+                # Kumpulkan koordinat X & Y
                 if event.type == evdev.ecodes.EV_ABS:
                     if event.code == evdev.ecodes.ABS_X:
                         self.raw_x = event.value
-                        self.is_touch_down = True
                     elif event.code == evdev.ecodes.ABS_Y:
                         self.raw_y = event.value
-                        self.is_touch_down = True
                     elif event.code == getattr(evdev.ecodes, 'ABS_PRESSURE', 24):
+                        was_down = self.is_touch_down
                         self.is_touch_down = (event.value > 0)
-                        if not self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
-                            px, py = self._calc_screen_coords()
-                            self._post_click(px, py)
+                        # Jari baru diangkat (pressure=0): kirim klik dengan koordinat terakhir
+                        if was_down and not self.is_touch_down:
+                            if self.raw_x is not None and self.raw_y is not None:
+                                px, py = self._calc_screen_coords()
+                                print(f"[GUI Touch] Release (pressure=0): raw=({self.raw_x},{self.raw_y}) -> px=({px},{py})", flush=True)
+                                self._post_click(px, py)
 
-                # Tangani event penekanan (BTN_TOUCH / BTN_LEFT)
+                # Jari diangkat (BTN_TOUCH=0): kirim klik dengan koordinat terakhir
                 elif event.type == evdev.ecodes.EV_KEY:
                     if event.code in (evdev.ecodes.BTN_TOUCH, evdev.ecodes.BTN_LEFT):
                         if event.value == 1:
                             self.is_touch_down = True
+                            last_syn_x = None  # Reset koordinat sinkronisasi
+                            last_syn_y = None
                         elif event.value == 0:
+                            self.is_touch_down = False
                             if self.raw_x is not None and self.raw_y is not None:
                                 px, py = self._calc_screen_coords()
+                                print(f"[GUI Touch] Release (BTN_TOUCH=0): raw=({self.raw_x},{self.raw_y}) -> px=({px},{py})", flush=True)
                                 self._post_click(px, py)
-                            self.is_touch_down = False
 
-                # Tangani sinkronisasi (EV_SYN)
-                elif event.type == evdev.ecodes.EV_SYN and getattr(evdev.ecodes, 'SYN_REPORT', 0) == event.code:
-                    if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
-                        px, py = self._calc_screen_coords()
-                        self._post_click(px, py)
+                # EV_SYN: Fallback jika device tidak punya BTN_TOUCH/PRESSURE
+                elif event.type == evdev.ecodes.EV_SYN:
+                    if event.code == getattr(evdev.ecodes, 'SYN_REPORT', 0):
+                        if use_syn_fallback:
+                            # Mode fallback: kirim tiap perubahan koordinat (pakai cooldown)
+                            if self.raw_x is not None and self.raw_y is not None:
+                                if self.raw_x != last_syn_x or self.raw_y != last_syn_y:
+                                    last_syn_x = self.raw_x
+                                    last_syn_y = self.raw_y
+                                    px, py = self._calc_screen_coords()
+                                    self._post_click(px, py)
 
         except Exception as e:
             print(f"[GUI Touch] Touch loop selesai/berhenti: {e}", flush=True)
