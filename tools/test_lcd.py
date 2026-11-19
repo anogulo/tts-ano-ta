@@ -303,10 +303,12 @@ def run_lcd_test():
                         save_status_text = "TERSMPAN!" if ok else "GAGAL SIMPAN"
                         save_msg_until = time.time() + 2.5
                     else:
-                        # Cek tombol fungsi aplikasi
+                        # Cek tombol fungsi aplikasi (zona ramah sentuhan mencakup hingga dasar layar y=240)
                         hit = False
                         for b_id, btn in buttons.items():
-                            if btn["rect"].inflate(4, 4).collidepoint(pos):
+                            b_r = btn["rect"]
+                            hit_rect = pygame.Rect(b_r.x - 2, 162, b_r.width + 4, 78)
+                            if hit_rect.collidepoint(pos):
                                 last_button_hit = b_id
                                 print(f"\n>>> [HIT TOMBOL!] Anda berhasil menekan: [{btn['label']}] di koordinat ({px}, {py})", flush=True)
                                 hit = True

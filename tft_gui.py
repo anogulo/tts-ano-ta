@@ -248,8 +248,10 @@ class LinuxTouchReader:
             if self.device:
                 self.thread = threading.Thread(target=self._touch_loop, daemon=True)
                 self.thread.start()
-            # Listener mouse USB /dev/input/mice agar mouse USB bisa digunakan langsung
-            if os.path.exists("/dev/input/mice"):
+            # JANGAN jalankan _mouse_loop jika perangkat touchscreen evdev aktif!
+            # Driver kernel Linux (mousedev) menduplikasi event touchscreen ke /dev/input/mice
+            # sebagai pergerakan relatif acak yang merusak koordinat layar sentuh.
+            elif os.path.exists("/dev/input/mice"):
                 self.mouse_thread = threading.Thread(target=self._mouse_loop, daemon=True)
                 self.mouse_thread.start()
 
@@ -905,13 +907,13 @@ class TFTGuiPygame:
                                     btn["action"]()
                                     break
                     else:
-                        # Cek setiap tombol utama di baris bawah dengan toleransi padding
+                        # Cek setiap tombol utama di baris bawah dengan zona sentuh ramah jari (mencakup hingga tepi bawah y=240)
                         handled = False
                         for name, btn in self.buttons.items():
                             if name == "vol":
                                 continue
-                            # Batasi padding ke 4px agar tidak tumpang tindih ke tombol tetangga
-                            hit_rect = btn["rect"].inflate(4, 4)
+                            b_r = btn["rect"]
+                            hit_rect = pygame.Rect(b_r.x - 2, 162, b_r.width + 4, 78)
                             if hit_rect.collidepoint(pos):
                                 print(f"[GUI Event] Tombol [{btn['label']}] DITEKAN pada koordinat ({px}, {py})")
                                 self.pressed_button = name
