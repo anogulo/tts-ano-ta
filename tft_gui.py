@@ -461,6 +461,12 @@ class TFTGuiPygame:
         self._last_temp_check = 0.0
         self._cached_temp = ""
 
+        # Auto-scroll & Voice Synchronization state
+        self.scroll_y = 0.0
+        self.target_scroll_y = 0.0
+        self._cached_reading_hash = None
+        self._cached_wrapped_items = []
+
         # Inisialisasi tombol sentuh
         self.buttons = {}
         self.modal_buttons = {}
@@ -523,23 +529,17 @@ class TFTGuiPygame:
         # Alias backward-compatibility untuk referensi ke "vol"
         self.buttons["vol"] = self.buttons["vol_up"]
 
-        # Tombol Modal Dialog Konfirmasi Daya / Keluar
+        # Tombol Modal Dialog Konfirmasi Daya (Mati Total)
         self.modal_buttons = {
             "shutdown": {
-                "rect": rect_factory(45, 80, 230, 36),
-                "label": "⏻ MATIKAN PI (SHUTDOWN)",
+                "rect": rect_factory(45, 75, 230, 42),
+                "label": "⏻ MATIKAN TOTAL (OFF)",
                 "color": self.C_DANGER,
                 "action": self._confirm_shutdown
             },
-            "exit": {
-                "rect": rect_factory(45, 126, 110, 34),
-                "label": "🚪 MENU UTAMA",
-                "color": self.C_INFO,
-                "action": self._confirm_exit_gui
-            },
             "cancel": {
-                "rect": rect_factory(165, 126, 110, 34),
-                "label": "✖ BATAL",
+                "rect": rect_factory(45, 126, 230, 36),
+                "label": "✖ BATAL / KEMBALI",
                 "color": (71, 85, 105),
                 "action": self._cancel_dialog
             }
@@ -769,9 +769,16 @@ class TFTGuiPygame:
         self.show_power_dialog = True
 
     def _confirm_shutdown(self):
-        self.status_msg = "MEMATIKAN PI..."
+        self.status_msg = "MEMATIKAN TOTAL..."
         self.status_color = self.C_DANGER
         self.show_power_dialog = False
+        if self.screen:
+            self.screen.fill((0, 0, 0))
+            if hasattr(self, 'font_title') and self.font_title:
+                txt = self.font_title.render("SISTEM DIMATIKAN TOTAL...", True, (255, 255, 255))
+                self.screen.blit(txt, ((self.width - txt.get_width()) // 2, (self.height - txt.get_height()) // 2))
+            if self.fb_blitter:
+                self.fb_blitter.blit(self.screen)
         self.app._run_async(self.app.safe_shutdown)
 
     def _confirm_exit_gui(self):
@@ -891,14 +898,11 @@ class TFTGuiPygame:
                     print(f"[GUI Event] Klik/Sentuh terdeteksi di layar pada koordinat ({px}, {py})")
 
                     if self.show_power_dialog:
-                        # Event klik pada modal dialog daya
-                        if 70 <= py <= 118 and 35 <= px <= 285:
-                            print("[GUI Event] Klik Modal -> MATIKAN PI")
+                        # Event klik pada modal dialog daya (Matikan Total atau Batal)
+                        if 70 <= py <= 120 and 40 <= px <= 280:
+                            print("[GUI Event] Klik Modal -> MATIKAN TOTAL")
                             self._confirm_shutdown()
-                        elif 120 <= py <= 165 and 35 <= px < 160:
-                            print("[GUI Event] Klik Modal -> MENU UTAMA")
-                            self._confirm_exit_gui()
-                        elif 120 <= py <= 165 and 160 <= px <= 285:
+                        elif 122 <= py <= 168 and 40 <= px <= 280:
                             print("[GUI Event] Klik Modal -> BATAL")
                             self._cancel_dialog()
                         else:
@@ -1008,34 +1012,127 @@ class TFTGuiPygame:
             lbl_vol_info = self.font_stats.render(f"AUDIO: {vol_val}%", True, self.C_ACCENT)
             self.screen.blit(lbl_vol_info, (12, 134))
 
-            # --- C. Kartu Kanan: Cuplikan Teks Bacaan (186 x 136) ---
+            # --- C. Kartu Kanan: Cuplikan Teks Bacaan (186 x 136) dengan Auto-Scroll & Voice Sync ---
             card_txt = pygame.Rect(128, 30, 186, 136)
             pygame.draw.rect(self.screen, self.C_CARD, card_txt, border_radius=6)
             pygame.draw.rect(self.screen, self.C_CARD_BORDER, card_txt, width=1, border_radius=6)
 
-            hdr_txt = self.font_btn.render("TEKS DIBACA:", True, self.C_TEXT_MUTED)
-            self.screen.blit(hdr_txt, (134, 34))
+            # Cek status kalimat aktif yang sedang dibaca suara
+            reading_sentences = getattr(self.app, 'last_reading', []) or []
+            active_s_idx = getattr(self.app, 'current_sentence_idx', -1)
+            is_reading = self.app.busy and getattr(self.app.speaker, 'playing', False) and active_s_idx >= 0
 
-            full_text = " ".join(self.app.last_reading) if self.app.last_reading else "Belum ada dokumen yang dibaca. Tekan tombol [BACA] untuk memotret."
-            words = full_text.split()
-            lines = []
-            cur_line = ""
-            for w in words:
-                if len(cur_line) + len(w) + 1 <= 24:
-                    cur_line = f"{cur_line} {w}".strip()
-                else:
-                    lines.append(cur_line)
-                    cur_line = w
-                if len(lines) >= 5:
-                    break
-            if cur_line and len(lines) < 5:
-                lines.append(cur_line)
+            # Update cache pembungkusan baris (line wrapping) hanya saat dokumen berubah
+            reading_tuple = tuple(reading_sentences)
+            if reading_tuple != self._cached_reading_hash:
+                self._cached_reading_hash = reading_tuple
+                self._cached_wrapped_items = []
+                self.scroll_y = 0.0
+                self.target_scroll_y = 0.0
+                max_w = 170
 
-            y_txt = 50
-            for l in lines:
-                l_surf = self.font_text.render(l, True, self.C_TEXT)
-                self.screen.blit(l_surf, (134, y_txt))
-                y_txt += 15
+                for s_idx, sentence in enumerate(reading_sentences):
+                    words = sentence.split()
+                    cur_line = ""
+                    is_first = True
+                    for w in words:
+                        test_line = f"{cur_line} {w}".strip() if cur_line else w
+                        if self.font_text.size(test_line)[0] <= max_w:
+                            cur_line = test_line
+                        else:
+                            if cur_line:
+                                self._cached_wrapped_items.append((s_idx, cur_line, is_first))
+                                is_first = False
+                            cur_line = w
+                    if cur_line:
+                        self._cached_wrapped_items.append((s_idx, cur_line, is_first))
+
+            # Header Kartu Teks
+            if is_reading and reading_sentences:
+                total_s = len(reading_sentences)
+                cur_s = min(total_s, active_s_idx + 1)
+                pulse = "▶" if (int(time.time() * 2) % 2 == 0) else "▷"
+                hdr_label = f"DIBACA [{cur_s}/{total_s}] {pulse}"
+                hdr_surf = self.font_stats.render(hdr_label, True, self.C_PRIMARY)
+            else:
+                hdr_surf = self.font_stats.render("TEKS BACAAN:", True, self.C_TEXT_MUTED)
+            self.screen.blit(hdr_surf, (134, 34))
+
+            if not is_reading and reading_sentences:
+                cnt_txt = self.font_stats.render(f"{len(reading_sentences)} kal", True, self.C_TEXT_MUTED)
+                self.screen.blit(cnt_txt, (270, 34))
+
+            # Area Viewport Teks (Tinggi 112px, y=50 sampai y=162)
+            viewport_rect = pygame.Rect(132, 50, 178, 112)
+            LINE_H = 16
+            total_lines = len(self._cached_wrapped_items)
+            total_height = total_lines * LINE_H
+            max_scroll = max(0.0, float(total_height - 110))
+
+            # Auto-Scroll otomatis ke baris kalimat yang sedang dibaca suara
+            if is_reading and reading_sentences:
+                first_active_line = 0
+                for l_idx, (s_idx, _, _) in enumerate(self._cached_wrapped_items):
+                    if s_idx == active_s_idx:
+                        first_active_line = l_idx
+                        break
+                # Posisikan baris aktif di baris ke-1 atau ke-2 dalam viewport
+                ideal_line = max(0, first_active_line - 1)
+                self.target_scroll_y = min(max_scroll, float(ideal_line * LINE_H))
+            elif not reading_sentences:
+                self.target_scroll_y = 0.0
+
+            # Easing animasi scroll halus per frame
+            self.scroll_y += (self.target_scroll_y - self.scroll_y) * 0.25
+            if abs(self.target_scroll_y - self.scroll_y) < 0.5:
+                self.scroll_y = self.target_scroll_y
+
+            # Gambar Teks dengan Batas Viewport (Clip)
+            self.screen.set_clip(viewport_rect)
+
+            if not reading_sentences:
+                empty_msgs = [
+                    "Belum ada dokumen yang dibaca.",
+                    "",
+                    "Sentuh tombol [BACA] untuk",
+                    "memotret dan membaca teks."
+                ]
+                y_e = 54
+                for em in empty_msgs:
+                    e_surf = self.font_text.render(em, True, self.C_TEXT_MUTED)
+                    self.screen.blit(e_surf, (136, y_e))
+                    y_e += 16
+            else:
+                for l_idx, (s_idx, line_str, is_first) in enumerate(self._cached_wrapped_items):
+                    y_pos = int(50 + l_idx * LINE_H - self.scroll_y)
+                    if y_pos + LINE_H < 48 or y_pos > 165:
+                        continue  # Di luar area kartu
+
+                    is_active_sentence = (is_reading and s_idx == active_s_idx)
+
+                    if is_active_sentence:
+                        # Highlight baris kalimat aktif (latar hijau gelap lembut + aksen tepi)
+                        bg_r = pygame.Rect(132, y_pos - 1, 174, LINE_H)
+                        pygame.draw.rect(self.screen, (16, 52, 44), bg_r, border_radius=3)
+                        pygame.draw.rect(self.screen, (52, 211, 153), pygame.Rect(132, y_pos - 1, 3, LINE_H), border_radius=1)
+                        t_surf = self.font_text.render(line_str, True, (255, 255, 255))
+                        self.screen.blit(t_surf, (138, y_pos))
+                    else:
+                        t_surf = self.font_text.render(line_str, True, self.C_TEXT_MUTED)
+                        self.screen.blit(t_surf, (136, y_pos))
+
+            # Scrollbar Mini vertikal jika dokumen panjang
+            if max_scroll > 0:
+                sb_h = 108
+                track_r = pygame.Rect(308, 52, 2, sb_h)
+                pygame.draw.rect(self.screen, (30, 41, 59), track_r, border_radius=1)
+                thumb_h = max(10, int(sb_h * (112.0 / total_height)))
+                thumb_y = 52 + int((self.scroll_y / max_scroll) * (sb_h - thumb_h))
+                thumb_r = pygame.Rect(308, thumb_y, 2, thumb_h)
+                pygame.draw.rect(self.screen, (100, 116, 139), thumb_r, border_radius=1)
+
+            # Lepaskan clip agar tidak memotong elemen layar lainnya
+            self.screen.set_clip(None)
 
             # --- D. Tombol Sentuh Bawah dengan Border Terpisah (Tinggi 64px) ---
             for name, btn in self.buttons.items():
@@ -1095,7 +1192,7 @@ class TFTGuiPygame:
                 pygame.draw.rect(self.screen, self.C_CARD, dlg_rect, border_radius=8)
                 pygame.draw.rect(self.screen, self.C_CARD_BORDER, dlg_rect, width=2, border_radius=8)
 
-                dlg_title = self.font_title.render("MENU DAYA & SISTEM", True, self.C_TEXT)
+                dlg_title = self.font_title.render("KONFIRMASI MATIKAN DAYA", True, self.C_TEXT)
                 self.screen.blit(dlg_title, (dlg_rect.x + (dlg_rect.width - dlg_title.get_width()) // 2, 52))
 
                 for m_name, m_btn in self.modal_buttons.items():

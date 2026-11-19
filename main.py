@@ -407,17 +407,39 @@ class App:
         # Beri feedback nada klik pada volume baru
         self.cue('klik', wait=True)
 
+    @property
+    def current_sentence_idx(self) -> int:
+        if hasattr(self, 'speaker') and self.speaker:
+            return getattr(self.speaker, 'current_sentence_idx', -1)
+        return -1
+
     def safe_shutdown(self):
-        """Mematikan sistem Raspberry Pi secara aman."""
+        """Mematikan sistem Raspberry Pi secara aman dan mati total (poweroff)."""
         self.cue('mati', wait=True)
-        time.sleep(1.0)
+        time.sleep(0.5)
+
+        # Matikan layar LCD (isi frame hitam pekat) sebelum poweroff agar tidak freeze di gambar terakhir
+        if hasattr(self, 'gui') and self.gui:
+            try:
+                if hasattr(self.gui, 'screen') and self.gui.screen:
+                    self.gui.screen.fill((0, 0, 0))
+                    if hasattr(self.gui, 'fb_blitter') and self.gui.fb_blitter:
+                        self.gui.fb_blitter.blit(self.gui.screen)
+            except Exception:
+                pass
+
         if platform.system() == "Linux":
             try:
-                subprocess.run(['sudo', '/usr/sbin/shutdown', '-h', 'now'], check=False)
+                # 1. systemctl poweroff: standar systemd modern untuk mematikan daya hardware secara total
+                subprocess.run(['sudo', '/usr/bin/systemctl', 'poweroff', '-i'], check=False)
+                # 2. shutdown -P now (-P = poweroff total, BUKAN halt -h)
+                subprocess.run(['sudo', '/usr/sbin/shutdown', '-P', 'now'], check=False)
+                # 3. Fallback: poweroff langsung
+                subprocess.run(['sudo', '/sbin/poweroff'], check=False)
             except Exception as e:
                 log.error("Gagal mengeksekusi shutdown: %s", e)
         else:
-            log.info("[Mock Shutdown] Perangkat dimatikan.")
+            log.info("[Mock Shutdown] Perangkat dimatikan total.")
 
     # ================= Alur Pemrosesan Inti =================
     def _run_async(self, fn):

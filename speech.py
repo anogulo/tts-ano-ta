@@ -32,6 +32,8 @@ class Speaker:
         self.voice = None
         self.rate = 22050  # Default Piper sample rate
         self.playing = False
+        self.current_sentence_idx = -1
+        self.current_sentence_text = ""
         self._proc: Optional[subprocess.Popen] = None
         self._cue: Optional[subprocess.Popen] = None
         self._stop = threading.Event()
@@ -129,9 +131,11 @@ class Speaker:
         except Exception:
             pass
 
-    def say(self, sentences: List[str], on_first: Optional[Callable[[], None]] = None) -> bool:
+    def say(self, sentences: List[str], on_first: Optional[Callable[[], None]] = None,
+            on_sentence: Optional[Callable[[int, str], None]] = None) -> bool:
         """
         FR-08 & FR-09: Sintesis dan putar per kalimat secara streaming.
+        Sinkronisasi indeks kalimat real-time untuk visualisasi GUI.
         Blok hingga selesai atau dihentikan oleh stop().
         Mengembalikan True jika selesai utuh, False jika diinterupsi / gagal.
         """
@@ -147,48 +151,67 @@ class Speaker:
 
         self._stop.clear()
         self.playing = True
+        self.current_sentence_idx = -1
+        self.current_sentence_text = ""
         first_audio_called = False
 
         if self.has_aplay:
-            # Jalur utama Raspberry Pi 4 dengan ALSA aplay
+            # Jalur utama Raspberry Pi 4 dengan ALSA aplay per-kalimat agar sinkronisasi visual presisi
             try:
-                self._proc = subprocess.Popen(
-                    [
-                        'aplay', '-q', '-D', self.device,
-                        '-t', 'raw', '-f', 'S16_LE',
-                        '-c', '1', '-r', str(self.rate), '-'
-                    ],
-                    stdin=subprocess.PIPE,
-                    bufsize=0
-                )
-
-                for sentence in sentences:
+                for idx, sentence in enumerate(sentences):
                     if self._stop.is_set():
                         return False
 
-                    for pcm in self._pcm(sentence):
+                    self.current_sentence_idx = idx
+                    self.current_sentence_text = sentence
+                    if on_sentence:
+                        try:
+                            on_sentence(idx, sentence)
+                        except Exception:
+                            pass
+
+                    # Kumpulkan potongan PCM untuk kalimat ini
+                    pcm_chunks = []
+                    for chunk in self._pcm(sentence):
                         if self._stop.is_set():
                             return False
+                        pcm_chunks.append(chunk)
 
-                        if on_first and not first_audio_called:
-                            on_first()
-                            first_audio_called = True
+                    if not pcm_chunks:
+                        continue
 
-                        if self._proc and self._proc.stdin:
-                            try:
-                                self._proc.stdin.write(pcm)
-                            except (BrokenPipeError, OSError):
-                                return False
+                    if on_first and not first_audio_called:
+                        on_first()
+                        first_audio_called = True
 
-                if self._proc and self._proc.stdin:
-                    self._proc.stdin.close()
-                    self._proc.wait()
+                    pcm_data = b''.join(pcm_chunks)
+
+                    self._proc = subprocess.Popen(
+                        [
+                            'aplay', '-q', '-D', self.device,
+                            '-t', 'raw', '-f', 'S16_LE',
+                            '-c', '1', '-r', str(self.rate), '-'
+                        ],
+                        stdin=subprocess.PIPE,
+                        bufsize=0
+                    )
+
+                    try:
+                        self._proc.communicate(input=pcm_data)
+                    except (BrokenPipeError, OSError):
+                        return False
+
+                    if self._stop.is_set():
+                        return False
+
                 return not self._stop.is_set()
 
             except (BrokenPipeError, ValueError, OSError):
                 return False
             finally:
                 self.playing = False
+                self.current_sentence_idx = -1
+                self.current_sentence_text = ""
                 if self._proc and self._proc.poll() is None:
                     try:
                         self._proc.kill()
@@ -202,6 +225,14 @@ class Speaker:
                 for idx, sentence in enumerate(sentences):
                     if self._stop.is_set():
                         return False
+
+                    self.current_sentence_idx = idx
+                    self.current_sentence_text = sentence
+                    if on_sentence:
+                        try:
+                            on_sentence(idx, sentence)
+                        except Exception:
+                            pass
 
                     print(f" [Audio TTS] Sedang membacakan ({idx + 1}/{len(sentences)}): \"{sentence}\"")
                     pcm_chunks = list(self._pcm(sentence))
@@ -222,6 +253,8 @@ class Speaker:
                 return not self._stop.is_set()
             finally:
                 self.playing = False
+                self.current_sentence_idx = -1
+                self.current_sentence_text = ""
 
     def _play_pcm_buffer(self, pcm_data: bytes):
         """Memutar buffer PCM sementara pada mode fallback."""
@@ -251,6 +284,8 @@ class Speaker:
         """FR-09: Menghentikan pemutaran audio seketika saat tombol ditekan."""
         self._stop.set()
         self.playing = False
+        self.current_sentence_idx = -1
+        self.current_sentence_text = ""
         if self._proc and self._proc.poll() is None:
             try:
                 self._proc.kill()

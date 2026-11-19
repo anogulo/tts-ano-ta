@@ -52,9 +52,9 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install pytesseract>=0.3.10 piper-tts>=1.2.0 onnxruntime>=1.15.0 evdev>=1.6.0
 
-# 5. Konfigurasi Izin Shutdown Aman tanpa Password (untuk tombol bantu GPIO27)
+# 5. Konfigurasi Izin Shutdown Aman tanpa Password (untuk tombol bantu GPIO27 & tombol OFF GUI)
 echo "-> [5/7] Mengonfigurasi izin shutdown aman tanpa password..."
-sudo bash -c "echo '$USER ALL=(root) NOPASSWD: /usr/sbin/shutdown' > /etc/sudoers.d/reader_shutdown"
+sudo bash -c "echo '$USER ALL=(root) NOPASSWD: /usr/sbin/shutdown, /usr/bin/systemctl poweroff*, /sbin/poweroff, /usr/sbin/poweroff' > /etc/sudoers.d/reader_shutdown"
 sudo chmod 0440 /etc/sudoers.d/reader_shutdown
 
 # 6. Generate dan Verifikasi Aset Audio Status (*.wav)
