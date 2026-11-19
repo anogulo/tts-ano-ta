@@ -158,6 +158,8 @@ class LinuxTouchReader:
         print(f"[GUI Touch] Kalibrasi ADC: X=[{min_adc_x}~{max_adc_x}] Y=[{min_adc_y}~{max_adc_y}] "
               f"swap_xy={swap_xy} invert_x={invert_x} invert_y={invert_y}", flush=True)
 
+        self.is_pixel_coords = False
+
         if not sys.platform.startswith("linux"):
             return
 
@@ -182,6 +184,28 @@ class LinuxTouchReader:
                     print(f"[GUI Touch] Auto-detect device sentuh: {self.device.name} ({dev_path})", flush=True)
                 except Exception as e:
                     print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}", flush=True)
+
+        if self.device:
+            try:
+                caps = self.device.capabilities()
+                if evdev.ecodes.EV_ABS in caps:
+                    abs_dict = dict(caps[evdev.ecodes.EV_ABS])
+                    abs_x = abs_dict.get(evdev.ecodes.ABS_X)
+                    abs_y = abs_dict.get(evdev.ecodes.ABS_Y)
+                    if abs_x and abs_x.max > 0:
+                        if abs_x.max <= 480 and abs_y and abs_y.max <= 480:
+                            print(f"[GUI Touch] Driver kernel sudah menghasilkan koordinat layar piksel (X_max={abs_x.max}, Y_max={abs_y.max}).", flush=True)
+                            self.is_pixel_coords = True
+                        else:
+                            print(f"[GUI Touch] Hardware range dari driver: X=[{abs_x.min}~{abs_x.max}], Y=[{abs_y.min}~{abs_y.max}]", flush=True)
+                            if self.min_adc_x == 200 and self.max_adc_x == 3900:
+                                self.min_adc_x = abs_x.min
+                                self.max_adc_x = abs_x.max
+                            if self.min_adc_y == 200 and self.max_adc_y == 3900:
+                                self.min_adc_y = abs_y.min
+                                self.max_adc_y = abs_y.max
+            except Exception as err:
+                print(f"[GUI Touch] Gagal membaca absinfo driver: {err}", flush=True)
 
         if self.device is None:
             print("[GUI Touch] PERINGATAN: Tidak ada hardware touchscreen (ADS7846/XPT2046) yang terdeteksi di /dev/input/!", flush=True)
@@ -233,10 +257,25 @@ class LinuxTouchReader:
         if self.raw_x is None or self.raw_y is None:
             return self.cursor_x, self.cursor_y
 
-        span_x = max(1, self.max_adc_x - self.min_adc_x)
-        span_y = max(1, self.max_adc_y - self.min_adc_y)
-        nx = max(0.0, min(1.0, (self.raw_x - self.min_adc_x) / span_x))
-        ny = max(0.0, min(1.0, (self.raw_y - self.min_adc_y) / span_y))
+        if getattr(self, 'is_pixel_coords', False):
+            # Driver kernel sudah menghasilkan koordinat pixel layar
+            nx = max(0.0, min(1.0, self.raw_x / float(self.width)))
+            ny = max(0.0, min(1.0, self.raw_y / float(self.height)))
+        else:
+            # Auto-adaptasi batas jika sinyal ADC melewati ambang batas
+            if self.raw_x < self.min_adc_x:
+                self.min_adc_x = self.raw_x
+            if self.raw_x > self.max_adc_x:
+                self.max_adc_x = self.raw_x
+            if self.raw_y < self.min_adc_y:
+                self.min_adc_y = self.raw_y
+            if self.raw_y > self.max_adc_y:
+                self.max_adc_y = self.raw_y
+
+            span_x = max(1, self.max_adc_x - self.min_adc_x)
+            span_y = max(1, self.max_adc_y - self.min_adc_y)
+            nx = max(0.0, min(1.0, (self.raw_x - self.min_adc_x) / float(span_x)))
+            ny = max(0.0, min(1.0, (self.raw_y - self.min_adc_y) / float(span_y)))
 
         if self.swap_xy:
             nx, ny = ny, nx
