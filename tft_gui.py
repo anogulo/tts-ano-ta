@@ -161,24 +161,41 @@ class LinuxTouchReader:
         if not sys.platform.startswith("linux"):
             return
 
-        if HAS_EVDEV:
-            dev_path = device_path.strip() if device_path else None
-            if dev_path and os.path.exists(dev_path):
+        if not HAS_EVDEV:
+            print("[GUI Touch] Peringatan: Modul Python 'evdev' tidak ditemukan. Layar sentuh hardware tidak aktif.", flush=True)
+            return
+
+        dev_path = device_path.strip() if device_path else None
+        if dev_path and os.path.exists(dev_path):
+            try:
+                self.device = evdev.InputDevice(dev_path)
+                print(f"[GUI Touch] Terhubung ke device sentuh: {self.device.name} ({dev_path})", flush=True)
+            except Exception as e:
+                print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}", flush=True)
+                dev_path = None
+
+        if self.device is None:
+            dev_path = self._detect_device()
+            if dev_path:
                 try:
                     self.device = evdev.InputDevice(dev_path)
-                    print(f"[GUI Touch] Terhubung ke device sentuh: {self.device.name} ({dev_path})")
+                    print(f"[GUI Touch] Auto-detect device sentuh: {self.device.name} ({dev_path})", flush=True)
                 except Exception as e:
-                    print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
-                    dev_path = None
+                    print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}", flush=True)
 
-            if self.device is None:
-                dev_path = self._detect_device()
-                if dev_path:
+        if self.device is None:
+            print("[GUI Touch] PERINGATAN: Tidak ada hardware touchscreen (ADS7846/XPT2046) yang terdeteksi di /dev/input/!", flush=True)
+            try:
+                found_devs = []
+                for p in evdev.list_devices():
                     try:
-                        self.device = evdev.InputDevice(dev_path)
-                        print(f"[GUI Touch] Auto-detect device sentuh: {self.device.name} ({dev_path})")
-                    except Exception as e:
-                        print(f"[GUI Touch] Tidak dapat membuka {dev_path}: {e}")
+                        d = evdev.InputDevice(p)
+                        found_devs.append(f"{p} -> {d.name}")
+                    except Exception as err:
+                        found_devs.append(f"{p} -> [Izin Ditolak: {err}]")
+                print(f"[GUI Touch] Input device yang ada di sistem: {found_devs or 'Tidak ada'}", flush=True)
+            except Exception:
+                pass
 
     def _detect_device(self) -> Optional[str]:
         """Auto-detect XPT2046/ADS7846 touch device: cek symlink dulu, lalu scan event*."""

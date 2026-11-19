@@ -62,6 +62,60 @@ def stop_service_if_running():
             print(f"[INFO] Cek status service: {e}", flush=True)
 
 
+def check_hardware_diagnostics():
+    """Diagnosa lengkap ketersediaan hardware touchscreen dan izin sistem."""
+    if not sys.platform.startswith("linux"):
+        return
+    print("\n--- [DIAGNOSA HARDWARE TOUCHSCREEN & INPUT] ---", flush=True)
+
+    # 1. Cek folder /dev/input
+    dev_inputs = []
+    if os.path.exists('/dev/input'):
+        try:
+            dev_inputs = sorted(os.listdir('/dev/input'))
+        except Exception as e:
+            dev_inputs = [f"Gagal baca: {e}"]
+    print(f" Daftar /dev/input   : {dev_inputs}", flush=True)
+
+    # 2. Cek apakah ada symlink /dev/input/touchscreen
+    if os.path.exists('/dev/input/touchscreen'):
+        print(" Symlink touchscreen : ADA (/dev/input/touchscreen)", flush=True)
+    else:
+        print(" Symlink touchscreen : Belum ada (/dev/input/touchscreen)", flush=True)
+
+    # 3. Cek SPI Bus
+    spis = []
+    if os.path.exists('/dev'):
+        try:
+            spis = [f for f in os.listdir('/dev') if f.startswith('spidev')]
+        except Exception:
+            pass
+    print(f" SPI Hardware       : {spis or 'Tidak aktif / spidev kosong'}", flush=True)
+
+    # 4. Cek dtoverlay di /boot/firmware/config.txt
+    cfg_paths = ['/boot/firmware/config.txt', '/boot/config.txt']
+    found_overlay = False
+    for cp in cfg_paths:
+        if os.path.exists(cp):
+            try:
+                with open(cp, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                overlays = [l.strip() for l in lines if not l.strip().startswith('#') and any(k in l.lower() for k in ('ads7846', 'xpt2046', 'piscreen', 'fbtft'))]
+                if overlays:
+                    print(f" Overlay di {cp} : {overlays}", flush=True)
+                    found_overlay = True
+                    break
+            except Exception:
+                pass
+
+    if not found_overlay:
+        print(" [PERHATIAN] Overlay touchscreen (ads7846) BELUM aktif di /boot/firmware/config.txt!", flush=True)
+        print("  Kernel Linux butuh baris ini agar chip sentuh XPT2046 dikenali:", flush=True)
+        print("  dtoverlay=ads7846,cs=1,penirq=25,penirq_pull=2,speed=50000", flush=True)
+
+    print("-----------------------------------------------\n", flush=True)
+
+
 def load_config() -> dict:
     """Muat konfigurasi toml."""
     if os.path.exists(CONFIG_PATH):
@@ -107,6 +161,7 @@ def save_touch_calibration(swap_xy: bool, invert_x: bool, invert_y: bool, fb_dev
 def run_lcd_test():
     """Jalankan program visual pengujian LCD & Sentuh."""
     stop_service_if_running()
+    check_hardware_diagnostics()
 
     cfg = load_config()
     gui_cfg = cfg.get('gui', {})
