@@ -28,9 +28,11 @@ if sys.platform.startswith("linux"):
         except Exception:
             pass
 
-    # Konfigurasi default SDL Framebuffer untuk LCD SPI Raspberry Pi
-    os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
-    os.environ.setdefault("SDL_FBDEV", "/dev/fb0")
+    # SDL2 tidak lagi mendukung fbcon. Gunakan dummy + FramebufferBlitter langsung ke /dev/fb*
+    # Jika pengguna sudah set SDL_VIDEODRIVER via environment, dihormati.
+    if "SDL_VIDEODRIVER" not in os.environ:
+        # Hindari fbcon (SDL1 only). Untuk TFT SPI: render ke SDL dummy, blit ke /dev/fb*
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ.setdefault("SDL_MOUSEDRV", "dummy")
     os.environ.setdefault("SDL_MOUSEDEV", "/dev/null")
     if "DISPLAY" not in os.environ:
@@ -446,16 +448,37 @@ class TFTGuiPygame:
         return t_cfg or {}
 
     def init_display(self):
-        """Inisialisasi layar Pygame (mendukung Linux Framebuffer /dev/fb1 untuk LCD SPI)."""
-        # Konfigurasi display driver untuk Linux jika belum ada DISPLAY
-        if sys.platform.startswith("linux"):
-            if "DISPLAY" not in os.environ and "WAYLAND_DISPLAY" not in os.environ:
-                if os.path.exists("/tmp/.X11-unix/X0"):
-                    os.environ["DISPLAY"] = ":0"
-                elif os.path.exists("/dev/fb1") or not os.path.exists("/dev/tty0"):
-                    # Di mode headless / console / SSH: gunakan driver dummy
-                    # Buffer tampilan akan ditulis langsung ke /dev/fb1 oleh FramebufferBlitter
-                    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        """Inisialisasi layar Pygame (mendukung Linux Framebuffer /dev/fb* untuk LCD SPI)."""
+
+        # --- Deteksi framebuffer yang tersedia ---
+        fb_candidates = []
+        for fb in ["/dev/fb0", "/dev/fb1", "/dev/fb2"]:
+            if os.path.exists(fb):
+                fb_candidates.append(fb)
+        print(f"[GUI Init] Framebuffer tersedia: {fb_candidates or 'tidak ada'}", flush=True)
+
+        # Tentukan target fb: gunakan fb_device dari config, atau auto-detect
+        target_fb = self.fb_device.strip() if self.fb_device else ""
+        if not target_fb or not os.path.exists(target_fb):
+            # Fallback: coba fb1 dulu (LCD SPI biasanya fb1), lalu fb0
+            for fb in ["/dev/fb1", "/dev/fb0"]:
+                if fb in fb_candidates:
+                    target_fb = fb
+                    print(f"[GUI Init] fb_device '{self.fb_device}' tidak ditemukan, beralih ke {target_fb}", flush=True)
+                    break
+        if target_fb and os.path.exists(target_fb):
+            print(f"[GUI Init] Target Framebuffer: {target_fb}", flush=True)
+        else:
+            print("[GUI Init] Tidak ada framebuffer yang ditemukan — render hanya ke SDL dummy.", flush=True)
+            target_fb = ""
+
+        # --- Inisialisasi SDL ---
+        # SDL2 tidak mendukung fbcon. Urutan percobaan: kmsdrm → dummy → memory surface
+        sdl_drivers_to_try = []
+        # Coba kmsdrm hanya jika ada /dev/dri (DRM) dan tidak via SSH
+        if os.path.exists("/dev/dri") and "SSH_CLIENT" not in os.environ:
+            sdl_drivers_to_try.append("kmsdrm")
+        sdl_drivers_to_try.append("dummy")
 
         if os.path.exists("/dev/input/touchscreen"):
             os.environ.setdefault("SDL_MOUSEDRV", "TSLIB")
@@ -469,43 +492,57 @@ class TFTGuiPygame:
             flags |= pygame.FULLSCREEN
 
         screen = None
-        for v_driver in [None, "dummy"]:
+        used_driver = "memory"
+        for v_driver in sdl_drivers_to_try:
             try:
-                if v_driver:
-                    os.environ["SDL_VIDEODRIVER"] = v_driver
-                    try:
-                        pygame.display.quit()
-                    except Exception:
-                        pass
-                    pygame.display.init()
-                use_flags = flags if v_driver != "dummy" else 0
+                os.environ["SDL_VIDEODRIVER"] = v_driver
+                try:
+                    pygame.display.quit()
+                except Exception:
+                    pass
+                pygame.display.init()
+                use_flags = flags if v_driver == "kmsdrm" else 0
                 screen = pygame.display.set_mode((self.width, self.height), use_flags)
-                if screen:
-                    break
+                used_driver = v_driver
+                print(f"[GUI Init] SDL driver '{v_driver}' berhasil digunakan.", flush=True)
+                break
             except Exception as e:
-                print(f"[GUI Init] Display driver ({v_driver or 'default'}) gagal: {e}", flush=True)
+                print(f"[GUI Init] SDL driver '{v_driver}' gagal: {e}", flush=True)
 
         if screen is None:
-            print("[GUI Init] Menggunakan memory surface (Direct Framebuffer Blitter mode)", flush=True)
-            screen = pygame.Surface((self.width, self.height))
+            print("[GUI Init] Semua SDL driver gagal — menggunakan pygame.Surface (memory buffer).", flush=True)
+            # Pastikan pygame masih bisa dipakai
+            try:
+                pygame.display.quit()
+            except Exception:
+                pass
+            try:
+                os.environ["SDL_VIDEODRIVER"] = "dummy"
+                pygame.display.init()
+                screen = pygame.display.set_mode((self.width, self.height), 0)
+                used_driver = "dummy-fallback"
+            except Exception:
+                screen = pygame.Surface((self.width, self.height))
+                used_driver = "surface"
 
         self.screen = screen
+        print(f"[GUI Init] Layar aktif ({self.width}x{self.height}), mode: {used_driver}", flush=True)
 
-        pygame.display.set_caption("Pembaca Tunanetra - 2.4 TFT")
+        try:
+            pygame.display.set_caption("Pembaca Tunanetra - 2.4 TFT")
+        except Exception:
+            pass
         self.clock = pygame.time.Clock()
 
-        # Inisialisasi Direct Framebuffer Blitter & Touch Reader
-        target_fb = self.fb_device or os.environ.get("SDL_FBDEV", "")
-        # Prioritaskan /dev/fb1 jika ada (LCD SPI 2.4"), atau /dev/fb0
-        if (not target_fb or target_fb == "/dev/fb0") and os.path.exists("/dev/fb1"):
-            target_fb = "/dev/fb1"
-        elif not target_fb:
-            target_fb = "/dev/fb0"
-
-        if os.path.exists(target_fb):
+        # --- Inisialisasi Direct Framebuffer Blitter ---
+        if target_fb:
             self.fb_blitter = FramebufferBlitter(device=target_fb, width=self.width, height=self.height)
+            if not self.fb_blitter.enabled:
+                print(f"[GUI Init] FramebufferBlitter gagal membuka {target_fb}. Layar tidak akan tampil di LCD.", flush=True)
+        else:
+            print("[GUI Init] FramebufferBlitter dilewati (tidak ada framebuffer).", flush=True)
 
-        # Muat konfigurasi touch dari config.toml
+        # --- Touch Reader ---
         t_cfg = self._get_touch_config()
         swap_xy = bool(t_cfg.get('swap_xy', True))
         inv_x = bool(t_cfg.get('invert_x', False))

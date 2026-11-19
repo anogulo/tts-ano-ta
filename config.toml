@@ -37,8 +37,8 @@ enabled = true           # Otomatis membuka antarmuka GUI layar sentuh TFT
 width = 320             # Resolusi LCD RHOS 24 TFT SPI (Landscape)
 height = 240
 fullscreen = false      # Set true untuk fullscreen di LCD SPI Raspberry Pi
-fb_device = "/dev/fb1"  # Target framebuffer LCD (/dev/fb1 atau /dev/fb0)
-video_driver = "fbcon"  # Driver video Pygame/SDL (fbcon | dummy)
+fb_device = "/dev/fb1"  # Target framebuffer LCD. Kosongkan "" untuk auto-detect (fb1 lalu fb0)
+video_driver = "dummy"  # SDL2 driver: dummy (render ke SDL) + FramebufferBlitter tulis ke fb_device
 
 [gui.touch]
 enabled = true           # Aktifkan pembaca sentuh/mouse hardware
