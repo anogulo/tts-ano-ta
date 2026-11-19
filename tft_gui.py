@@ -301,33 +301,44 @@ class LinuxTouchReader:
 
     def _touch_loop(self):
         try:
+            print(f"[GUI Touch] Touch loop aktif membaca dari {self.device.name} ({self.device.path})...", flush=True)
             for event in self.device.read_loop():
                 if not self.running:
                     break
 
+                # Tangani koordinat X & Y
                 if event.type == evdev.ecodes.EV_ABS:
                     if event.code == evdev.ecodes.ABS_X:
                         self.raw_x = event.value
+                        self.is_touch_down = True
                     elif event.code == evdev.ecodes.ABS_Y:
                         self.raw_y = event.value
+                        self.is_touch_down = True
+                    elif event.code == getattr(evdev.ecodes, 'ABS_PRESSURE', 24):
+                        self.is_touch_down = (event.value > 0)
+                        if not self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
+                            px, py = self._calc_screen_coords()
+                            self._post_click(px, py)
 
+                # Tangani event penekanan (BTN_TOUCH / BTN_LEFT)
                 elif event.type == evdev.ecodes.EV_KEY:
                     if event.code in (evdev.ecodes.BTN_TOUCH, evdev.ecodes.BTN_LEFT):
                         if event.value == 1:
                             self.is_touch_down = True
                         elif event.value == 0:
-                            if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
-                                self.is_touch_down = False
+                            if self.raw_x is not None and self.raw_y is not None:
                                 px, py = self._calc_screen_coords()
                                 self._post_click(px, py)
+                            self.is_touch_down = False
 
+                # Tangani sinkronisasi (EV_SYN)
                 elif event.type == evdev.ecodes.EV_SYN and getattr(evdev.ecodes, 'SYN_REPORT', 0) == event.code:
                     if self.is_touch_down and self.raw_x is not None and self.raw_y is not None:
                         px, py = self._calc_screen_coords()
                         self._post_click(px, py)
 
         except Exception as e:
-            print(f"[GUI Touch] Touch loop selesai/berhenti: {e}")
+            print(f"[GUI Touch] Touch loop selesai/berhenti: {e}", flush=True)
 
     def _mouse_loop(self):
         """Membaca mouse USB fisik melalui /dev/input/mice tanpa bergantung evdev."""
