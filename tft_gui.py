@@ -125,7 +125,10 @@ class LinuxTouchReader:
     Mengonversi sinyal sentuhan ke koordinat layar LCD (320x240)
     dan mengirim event ke antrian Pygame secara akurat tanpa deadzone.
     """
-    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False, device_path: str = ""):
+    def __init__(self, width: int = 320, height: int = 240, swap_xy: bool = False, invert_x: bool = False, invert_y: bool = False,
+                 device_path: str = "",
+                 min_adc_x: int = 200, max_adc_x: int = 3900,
+                 min_adc_y: int = 200, max_adc_y: int = 3900):
         self.width = width
         self.height = height
         self.swap_xy = swap_xy
@@ -146,11 +149,14 @@ class LinuxTouchReader:
         self.cursor_x = width // 2
         self.cursor_y = height // 2
 
-        # Rentang ADC kalibrasi XPT2046
-        self.min_adc_x = 180
-        self.max_adc_x = 3900
-        self.min_adc_y = 180
-        self.max_adc_y = 3900
+        # Rentang ADC kalibrasi XPT2046 (dari config.toml [gui.touch])
+        self.min_adc_x = min_adc_x
+        self.max_adc_x = max_adc_x
+        self.min_adc_y = min_adc_y
+        self.max_adc_y = max_adc_y
+
+        print(f"[GUI Touch] Kalibrasi ADC: X=[{min_adc_x}~{max_adc_x}] Y=[{min_adc_y}~{max_adc_y}] "
+              f"swap_xy={swap_xy} invert_x={invert_x} invert_y={invert_y}", flush=True)
 
         if not sys.platform.startswith("linux"):
             return
@@ -544,15 +550,21 @@ class TFTGuiPygame:
 
         # --- Touch Reader ---
         t_cfg = self._get_touch_config()
-        swap_xy = bool(t_cfg.get('swap_xy', True))
-        inv_x = bool(t_cfg.get('invert_x', False))
-        inv_y = bool(t_cfg.get('invert_y', True))
+        swap_xy    = bool(t_cfg.get('swap_xy',   False))
+        inv_x      = bool(t_cfg.get('invert_x',  False))
+        inv_y      = bool(t_cfg.get('invert_y',  False))
         dev_path_touch = str(t_cfg.get('device', ''))
+        min_adc_x  = int(t_cfg.get('min_adc_x',  200))
+        max_adc_x  = int(t_cfg.get('max_adc_x', 3900))
+        min_adc_y  = int(t_cfg.get('min_adc_y',  200))
+        max_adc_y  = int(t_cfg.get('max_adc_y', 3900))
 
         self.touch_reader = LinuxTouchReader(
             width=self.width, height=self.height,
             swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
-            device_path=dev_path_touch
+            device_path=dev_path_touch,
+            min_adc_x=min_adc_x, max_adc_x=max_adc_x,
+            min_adc_y=min_adc_y, max_adc_y=max_adc_y,
         )
         self.touch_reader.start()
 
