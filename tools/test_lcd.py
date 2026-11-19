@@ -171,7 +171,7 @@ def run_lcd_test():
     height = int(gui_cfg.get('height', 240))
 
     # Konfigurasi kalibrasi aktif
-    swap_xy = bool(touch_cfg.get('swap_xy', True))
+    swap_xy = bool(touch_cfg.get('swap_xy', False))
     invert_x = bool(touch_cfg.get('invert_x', False))
     invert_y = bool(touch_cfg.get('invert_y', True))
     dev_path_touch = str(touch_cfg.get('device', ''))

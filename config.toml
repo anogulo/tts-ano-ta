@@ -37,7 +37,7 @@ enabled = true           # Otomatis membuka antarmuka GUI layar sentuh TFT
 width = 320              # Resolusi LCD RHOS 24 TFT SPI (Landscape)
 height = 240
 fullscreen = false       # Set true untuk fullscreen di LCD SPI Raspberry Pi
-fb_device = "/dev/fb1"   # Target framebuffer LCD (coba /dev/fb0 jika fb1 tidak ada)
+fb_device = "/dev/fb0"   # Target framebuffer LCD (coba /dev/fb0 jika fb1 tidak ada)
 video_driver = "dummy"   # SDL2 driver: dummy + FramebufferBlitter tulis ke fb_device
 
 [gui.touch]
@@ -46,9 +46,9 @@ device = ""              # Kosongkan untuk auto-detect (/dev/input/touchscreen a
 
 # Kalibrasi Orientasi Sentuhan
 # Sentuh pojok kiri atas -> lihat log koordinat -> sesuaikan kombinasi di bawah
-swap_xy  = true          # true = tukar sumbu X/Y (layar landscape dari sensor portrait)
-invert_x = false         # true = balik arah horizontal
-invert_y = true          # true = balik arah vertikal
+swap_xy  = false         # false = sumbu X dan Y normal (sudah diverifikasi pada LCD 2.4)
+invert_x = false         # false = arah horizontal normal
+invert_y = true          # true = balik arah vertikal agar bawah adalah nilai Y maksimal
 
 # Kalibrasi ADC XPT2046
 # Jalankan: sudo evtest -> pilih touch device -> sentuh pojok-pojok -> catat ABS_X / ABS_Y
