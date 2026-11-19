@@ -6,7 +6,7 @@ settle_frames = 8        # frame dibuang agar autofocus dan eksposur stabil
 
 [quality]
 min_sharpness = 20.0     # ambang batas variansi Laplacian (diturunkan agar tidak false-alarm buram)
-min_brightness = 40.0    # ambang batas rata-rata grayscale (skala 0–255)
+min_brightness = 40.0    # ambang batas rata-rata grayscale (skala 0-255)
 max_retries = 1
 
 [ocr]
@@ -25,34 +25,33 @@ mixer = "Headphone"      # mixer kontrol untuk bcm2835 Headphones
 volume_steps = [40, 60, 80, 100]
 
 [gpio]
-btn_main = 23            # Pin Fisik 16 (GPIO23) - Tombol Utama Fisik (Opsional jika pakai GUI)
-btn_aux = 0              # Diset 0 (Nonaktif) karena Pin 13 / GPIO27 dipakai LCD RESET
-led = 0                  # Diset 0 (Nonaktif) karena Pin 15 / GPIO22 dipakai LCD DC, backlight sudah ke 3.3V Pin 17
+btn_main = 23            # Pin Fisik 16 (GPIO23) - Tombol Utama Fisik
+btn_aux = 0              # Diset 0 (Nonaktif)
+led = 0                  # Diset 0 (Nonaktif)
 
 [safety]
 max_temp_c = 75.0
 
 [gui]
 enabled = true           # Otomatis membuka antarmuka GUI layar sentuh TFT
-width = 320             # Resolusi LCD RHOS 24 TFT SPI (Landscape)
+width = 320              # Resolusi LCD RHOS 24 TFT SPI (Landscape)
 height = 240
-fullscreen = false      # Set true untuk fullscreen di LCD SPI Raspberry Pi
-fb_device = "/dev/fb1"  # Target framebuffer LCD. Kosongkan "" untuk auto-detect (fb1 lalu fb0)
-video_driver = "dummy"  # SDL2 driver: dummy (render ke SDL) + FramebufferBlitter tulis ke fb_device
+fullscreen = false       # Set true untuk fullscreen di LCD SPI Raspberry Pi
+fb_device = "/dev/fb1"   # Target framebuffer LCD (coba /dev/fb0 jika fb1 tidak ada)
+video_driver = "dummy"   # SDL2 driver: dummy + FramebufferBlitter tulis ke fb_device
 
 [gui.touch]
 enabled = true           # Aktifkan pembaca sentuh/mouse hardware
 device = ""              # Kosongkan untuk auto-detect (/dev/input/touchscreen atau event*)
 
-# --- Kalibrasi Orientasi Sentuhan ---
-# Coba kombinasi swap_xy/invert_x/invert_y jika tombol tidak sesuai posisi
-# Langkah: sentuh pojok kiri atas -> lihat log koordinat -> sesuaikan
-swap_xy  = true          # true  = tukar sumbu X↔Y (layar landscape dari sensor portrait)
-invert_x = false         # true  = balik arah horizontal
-invert_y = true          # true  = balik arah vertikal
+# Kalibrasi Orientasi Sentuhan
+# Sentuh pojok kiri atas -> lihat log koordinat -> sesuaikan kombinasi di bawah
+swap_xy  = true          # true = tukar sumbu X/Y (layar landscape dari sensor portrait)
+invert_x = false         # true = balik arah horizontal
+invert_y = true          # true = balik arah vertikal
 
-# --- Kalibrasi ADC XPT2046 (nilai raw dari evtest) ---
-# Jalankan: sudo evtest  -> pilih touch device -> sentuh pojok2 -> catat ABS_X / ABS_Y min & max
+# Kalibrasi ADC XPT2046
+# Jalankan: sudo evtest -> pilih touch device -> sentuh pojok-pojok -> catat ABS_X / ABS_Y
 min_adc_x = 200          # Nilai ABS_X saat sentuh KIRI
 max_adc_x = 3900         # Nilai ABS_X saat sentuh KANAN
 min_adc_y = 200          # Nilai ABS_Y saat sentuh ATAS
