@@ -4,10 +4,19 @@ Bagian dari Rancang Bangun Alat Bantu Baca Tunanetra (Image to Voice)
 Sesuai PRD Bagian 5 (FR-01, FR-10, FR-11, FR-12), Bagian 14, 15, dan 18.
 """
 
+import os
 import sys
+
+# Auto-exec menggunakan virtual environment (.venv) jika dijalankan dengan python sistem
+if sys.platform.startswith("linux") and sys.prefix == sys.base_prefix:
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    _venv_py = os.path.join(_script_dir, '.venv', 'bin', 'python')
+    if os.path.exists(_venv_py) and os.path.realpath(sys.executable) != os.path.realpath(_venv_py):
+        os.environ["VIRTUAL_ENV"] = os.path.dirname(os.path.dirname(_venv_py))
+        os.execv(_venv_py, [_venv_py] + sys.argv)
+
 import shutil
 import logging
-import os
 import platform
 import subprocess
 import threading
@@ -616,93 +625,126 @@ def watchdog_loop(app: App):
 
 
 if __name__ == '__main__':
-    log.info("=== Menjalankan Pembaca Tunanetra (Reader Service) ===")
-    app = App()
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
-    # Jalankan background watchdog thread
-    w_thread = threading.Thread(target=watchdog_loop, args=(app,), daemon=True)
-    w_thread.start()
+    try:
+        print("[Reader Service] Memulai aplikasi...", flush=True)
 
-    # Cek apakah mode GUI aktif dari argumen CLI (--gui) atau dari config.toml
-    use_gui = ('--gui' in sys.argv) or bool(cfg.get('gui', {}).get('enabled', False))
-    gui_w = int(cfg.get('gui', {}).get('width', 320))
-    gui_h = int(cfg.get('gui', {}).get('height', 240))
-    gui_fs = bool(cfg.get('gui', {}).get('fullscreen', False))
-    gui_fb = str(cfg.get('gui', {}).get('fb_device', '/dev/fb0'))
+        # Cek apakah reader.service sedang aktif di background (mencegah konflik kamera & ALSA)
+        if platform.system() == "Linux":
+            try:
+                svc_status = subprocess.run(
+                    ['systemctl', 'is-active', 'reader.service'],
+                    capture_output=True, text=True, timeout=1
+                ).stdout.strip()
+                if svc_status == 'active':
+                    print("\n" + "!" * 65, flush=True)
+                    print("[PERHATIAN] Layanan latar belakang 'reader.service' sedang aktif!", flush=True)
+                    print("Jika kamera atau audio bentrok, matikan dulu dengan:", flush=True)
+                    print("  sudo systemctl stop reader.service", flush=True)
+                    print("!" * 65 + "\n", flush=True)
+            except Exception:
+                pass
 
-    if use_gui:
-        print(f"\n[Reader Service] Membuka Antarmuka GUI TFT 2.4\" ({gui_w}x{gui_h}) di {gui_fb}...")
-        launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
-    elif not sys.stdin.isatty() and HAS_GPIO:
-        # Berjalan sebagai background service tanpa terminal interaktif (misal systemd)
-        print("[Reader Service] Mode Background Systemd Aktif. Menunggu tombol GPIO...")
-        try:
-            from signal import pause
-            pause()
-        except KeyboardInterrupt:
-            log.info("Layanan dimatikan.")
-            print("\nLayanan berhenti.")
-    else:
-        # Berjalan dari terminal interaktif (SSH / Konsol / Terminal Raspi / PC)
-        print("\n" + "=" * 65)
-        print(" [Reader Service] Mode Interaktif Terminal Aktif")
-        print(" =" * 65)
-        print(" Kontrol Terminal:")
-        print("  [Enter]  : Ambil gambar kamera & baca teks (Auto Tampil di Terminal)")
-        print("  [G]      : Buka Layar GUI Touchscreen TFT 2.4\" (Visual Modern)")
-        print("  [K]      : Pilih / Ganti Kamera Hardware yang Terhubung")
-        print("  [P]      : Pratinjau Live Video Kamera di Teks Terminal")
-        print("  [W]      : Pratinjau Jendela Pop-up Kamera (OpenCV Window + Ambil Foto Uji)")
-        print("  [T]      : Uji baca gambar contoh dari dataset/ (Mode Tanpa Kamera)")
-        print("  [R]      : Replay bacaan terakhir")
-        print("  [S]      : Stop pemutaran audio seketika")
-        print("  [V]      : Ubah volume siklis")
-        print("  [Q]      : Keluar dari program")
-        if HAS_GPIO:
-            print(" *(Info: Tombol fisik GPIO & Layar TFT juga tetap aktif di background)*")
-        print(" =" * 65 + "\n")
+        log.info("=== Menjalankan Pembaca Tunanetra (Reader Service) ===")
+        app = App()
 
-        import glob
-        try:
-            while True:
-                cmd = input("Perintah [Enter=Foto & Baca, G=GUI, K=Kamera, P=Terminal, W=Jendela, T=Test, Q=Keluar]: ").strip().lower()
-                if cmd == 'q':
-                    print("Keluar...")
-                    break
-                elif cmd == 'g':
-                    # Buka antarmuka GUI TFT touchscreen
-                    launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
-                elif cmd in ('k', 'c'):
-                    # Menu pilih kamera yang terhubung
-                    app.select_camera()
-                elif cmd == 'p':
-                    # Pratinjau live video langsung di terminal
-                    stream_terminal_camera(app.cap)
-                elif cmd == 'w':
-                    # Pratinjau jendela pop-up grafis dengan fitur ambil foto uji
-                    captured = show_opencv_window(app.cap, cue_callback=app.cue)
-                    if captured is not None:
-                        print("\n[Menu] Menjalankan OCR & Pembacaan Suara dari foto uji yang baru diambil...")
-                        app._run_async(lambda: app.capture_and_read(test_frame=captured))
-                elif cmd == 's':
-                    print("Menghentikan audio...")
-                    app.speaker.stop()
-                elif cmd == 'r':
-                    print("Memutar ulang bacaan terakhir...")
-                    app._run_async(app.replay)
-                elif cmd == 'v':
-                    app._run_async(app.cycle_volume)
-                elif cmd == 't':
-                    # Uji sampel gambar dari dataset
-                    samples = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset', '*.png')))
-                    if samples:
-                        sample_img = cv2.imread(samples[0])
-                        print(f"\nMembaca sampel: {os.path.basename(samples[0])}...")
-                        app._run_async(lambda: app.capture_and_read(test_frame=sample_img))
+        # Jalankan background watchdog thread
+        w_thread = threading.Thread(target=watchdog_loop, args=(app,), daemon=True)
+        w_thread.start()
+
+        # Cek apakah mode GUI aktif dari argumen CLI (--gui) atau dari config.toml
+        use_gui = ('--gui' in sys.argv) or bool(cfg.get('gui', {}).get('enabled', False))
+        gui_w = int(cfg.get('gui', {}).get('width', 320))
+        gui_h = int(cfg.get('gui', {}).get('height', 240))
+        gui_fs = bool(cfg.get('gui', {}).get('fullscreen', False))
+        gui_fb = str(cfg.get('gui', {}).get('fb_device', '/dev/fb0'))
+
+        if use_gui:
+            print(f"\n[Reader Service] Membuka Antarmuka GUI TFT 2.4\" ({gui_w}x{gui_h}) di {gui_fb}...", flush=True)
+            launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
+        elif not sys.stdin.isatty() and HAS_GPIO:
+            # Berjalan sebagai background service tanpa terminal interaktif (misal systemd)
+            print("[Reader Service] Mode Background Systemd Aktif. Menunggu tombol GPIO...", flush=True)
+            try:
+                from signal import pause
+                pause()
+            except KeyboardInterrupt:
+                log.info("Layanan dimatikan.")
+                print("\nLayanan berhenti.", flush=True)
+        else:
+            # Berjalan dari terminal interaktif (SSH / Konsol / Terminal Raspi / PC)
+            print("\n" + "=" * 65)
+            print(" [Reader Service] Mode Interaktif Terminal Aktif")
+            print(" =" * 65)
+            print(" Kontrol Terminal:")
+            print("  [Enter]  : Ambil gambar kamera & baca teks (Auto Tampil di Terminal)")
+            print("  [G]      : Buka Layar GUI Touchscreen TFT 2.4\" (Visual Modern)")
+            print("  [K]      : Pilih / Ganti Kamera Hardware yang Terhubung")
+            print("  [P]      : Pratinjau Live Video Kamera di Teks Terminal")
+            print("  [W]      : Pratinjau Jendela Pop-up Kamera (OpenCV Window + Ambil Foto Uji)")
+            print("  [T]      : Uji baca gambar contoh dari dataset/ (Mode Tanpa Kamera)")
+            print("  [R]      : Replay bacaan terakhir")
+            print("  [S]      : Stop pemutaran audio seketika")
+            print("  [V]      : Ubah volume siklis")
+            print("  [Q]      : Keluar dari program")
+            if HAS_GPIO:
+                print(" *(Info: Tombol fisik GPIO & Layar TFT juga tetap aktif di background)*")
+            print(" =" * 65 + "\n")
+
+            import glob
+            try:
+                while True:
+                    cmd = input("Perintah [Enter=Foto & Baca, G=GUI, K=Kamera, P=Terminal, W=Jendela, T=Test, Q=Keluar]: ").strip().lower()
+                    if cmd == 'q':
+                        print("Keluar...")
+                        break
+                    elif cmd == 'g':
+                        # Buka antarmuka GUI TFT touchscreen
+                        launch_gui(app, width=gui_w, height=gui_h, fullscreen=gui_fs, fb_device=gui_fb)
+                    elif cmd in ('k', 'c'):
+                        # Menu pilih kamera yang terhubung
+                        app.select_camera()
+                    elif cmd == 'p':
+                        # Pratinjau live video langsung di terminal
+                        stream_terminal_camera(app.cap)
+                    elif cmd == 'w':
+                        # Pratinjau jendela pop-up grafis dengan fitur ambil foto uji
+                        captured = show_opencv_window(app.cap, cue_callback=app.cue)
+                        if captured is not None:
+                            print("\n[Menu] Menjalankan OCR & Pembacaan Suara dari foto uji yang baru diambil...")
+                            app._run_async(lambda: app.capture_and_read(test_frame=captured))
+                    elif cmd == 's':
+                        print("Menghentikan audio...")
+                        app.speaker.stop()
+                    elif cmd == 'r':
+                        print("Memutar ulang bacaan terakhir...")
+                        app._run_async(app.replay)
+                    elif cmd == 'v':
+                        app._run_async(app.cycle_volume)
+                    elif cmd == 't':
+                        # Uji sampel gambar dari dataset
+                        samples = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset', '*.png')))
+                        if samples:
+                            sample_img = cv2.imread(samples[0])
+                            print(f"\nMembaca sampel: {os.path.basename(samples[0])}...")
+                            app._run_async(lambda: app.capture_and_read(test_frame=sample_img))
+                        else:
+                            print("Tidak ada sampel di folder dataset/.")
                     else:
-                        print("Tidak ada sampel di folder dataset/.")
-                else:
-                    print("Mengambil foto dari kamera dan memproses...")
-                    app._run_async(app.capture_and_read)
-        except (KeyboardInterrupt, EOFError):
-            print("\nLayanan berhenti.")
+                        print("Mengambil foto dari kamera dan memproses...")
+                        app._run_async(app.capture_and_read)
+            except (KeyboardInterrupt, EOFError):
+                print("\nLayanan berhenti.")
+    except KeyboardInterrupt:
+        print("\n[Reader Service] Aplikasi dihentikan pengguna.", flush=True)
+    except Exception as exc:
+        import traceback
+        print(f"\n[FATAL ERROR] Gagal menjalankan aplikasi: {exc}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        log.exception("Fatal error di main:")
+        sys.exit(1)

@@ -468,22 +468,39 @@ class TFTGuiPygame:
         if self.fullscreen:
             flags |= pygame.FULLSCREEN
 
-        try:
-            self.screen = pygame.display.set_mode((self.width, self.height), flags)
-        except pygame.error:
-            # Fallback jika SDL tidak menemukan monitor fisik (misal running via SSH)
-            os.environ["SDL_VIDEODRIVER"] = "dummy"
-            pygame.display.quit()
-            pygame.display.init()
-            self.screen = pygame.display.set_mode((self.width, self.height), flags)
+        screen = None
+        for v_driver in [None, "dummy"]:
+            try:
+                if v_driver:
+                    os.environ["SDL_VIDEODRIVER"] = v_driver
+                    try:
+                        pygame.display.quit()
+                    except Exception:
+                        pass
+                    pygame.display.init()
+                use_flags = flags if v_driver != "dummy" else 0
+                screen = pygame.display.set_mode((self.width, self.height), use_flags)
+                if screen:
+                    break
+            except Exception as e:
+                print(f"[GUI Init] Display driver ({v_driver or 'default'}) gagal: {e}", flush=True)
+
+        if screen is None:
+            print("[GUI Init] Menggunakan memory surface (Direct Framebuffer Blitter mode)", flush=True)
+            screen = pygame.Surface((self.width, self.height))
+
+        self.screen = screen
 
         pygame.display.set_caption("Pembaca Tunanetra - 2.4 TFT")
         self.clock = pygame.time.Clock()
 
         # Inisialisasi Direct Framebuffer Blitter & Touch Reader
-        target_fb = self.fb_device or os.environ.get("SDL_FBDEV", "/dev/fb0")
-        if not os.path.exists(target_fb) and os.path.exists("/dev/fb1"):
+        target_fb = self.fb_device or os.environ.get("SDL_FBDEV", "")
+        # Prioritaskan /dev/fb1 jika ada (LCD SPI 2.4"), atau /dev/fb0
+        if (not target_fb or target_fb == "/dev/fb0") and os.path.exists("/dev/fb1"):
             target_fb = "/dev/fb1"
+        elif not target_fb:
+            target_fb = "/dev/fb0"
 
         if os.path.exists(target_fb):
             self.fb_blitter = FramebufferBlitter(device=target_fb, width=self.width, height=self.height)
@@ -1065,12 +1082,17 @@ class TFTGuiTkinter:
 
 def launch_gui(app_instance, width: int = 320, height: int = 240, fullscreen: bool = False, fb_device: str = "/dev/fb0"):
     """Fungsi peluncur GUI utama dengan pemilihan engine cerdas (Pygame utama, Tkinter cadangan)."""
-    if HAS_PYGAME:
-        gui = TFTGuiPygame(app_instance, width=width, height=height, fullscreen=fullscreen, fb_device=fb_device)
-        gui.run()
-    elif HAS_TKINTER:
-        print("[GUI] Pygame belum terpasang, beralih ke engine Tkinter...")
-        gui = TFTGuiTkinter(app_instance, width=width, height=height)
-        gui.run()
-    else:
-        print("[GUI] Peringatan: Tidak ada engine GUI (pygame/tkinter) yang ditemukan.")
+    try:
+        if HAS_PYGAME:
+            gui = TFTGuiPygame(app_instance, width=width, height=height, fullscreen=fullscreen, fb_device=fb_device)
+            gui.run()
+        elif HAS_TKINTER:
+            print("[GUI] Pygame belum terpasang, beralih ke engine Tkinter...", flush=True)
+            gui = TFTGuiTkinter(app_instance, width=width, height=height)
+            gui.run()
+        else:
+            print("[GUI] Peringatan: Tidak ada engine GUI (pygame/tkinter) yang ditemukan.", flush=True)
+    except Exception as e:
+        import traceback
+        print(f"[GUI ERROR] Kesalahan saat menjalankan antarmuka grafis: {e}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)

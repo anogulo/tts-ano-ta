@@ -68,7 +68,7 @@ CURRENT_DIR=$(pwd)
 # Perbarui path direktori dan user pada berkas service sesuai lokasi saat ini
 sudo cp reader.service $SERVICE_PATH
 sudo sed -i "s|WorkingDirectory=.*|WorkingDirectory=$CURRENT_DIR|g" $SERVICE_PATH
-sudo sed -i "s|ExecStart=.*|ExecStart=$CURRENT_DIR/.venv/bin/python main.py|g" $SERVICE_PATH
+sudo sed -i "s|ExecStart=.*|ExecStart=$CURRENT_DIR/.venv/bin/python main.py --gui|g" $SERVICE_PATH
 sudo sed -i "s|User=.*|User=$USER|g" $SERVICE_PATH
 
 sudo systemctl daemon-reload

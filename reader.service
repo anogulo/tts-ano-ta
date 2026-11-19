@@ -1,15 +1,16 @@
 [Unit]
-Description=Pembaca Tunanetra (Image to Voice)
+Description=Pembaca Tunanetra (Image to Voice) - GUI TFT
 After=multi-user.target sound.target
 
 [Service]
-User=pi
-SupplementaryGroups=audio video gpio
-WorkingDirectory=/home/pi/reader
+User=raspy
+SupplementaryGroups=audio video gpio input
+WorkingDirectory=/home/raspy/TA_ANO/tts-ano-ta
+Environment=PYTHONUNBUFFERED=1
 Environment=OMP_THREAD_LIMIT=1
-ExecStart=/home/pi/reader/.venv/bin/python main.py
+ExecStart=/home/raspy/TA_ANO/tts-ano-ta/.venv/bin/python main.py --gui
 Restart=always
-RestartSec=2
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

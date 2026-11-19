@@ -33,11 +33,11 @@ led = 0                  # Diset 0 (Nonaktif) karena Pin 15 / GPIO22 dipakai LCD
 max_temp_c = 75.0
 
 [gui]
-enabled = false          # Ubah ke true jika ingin otomatis membuka layar sentuh TFT
+enabled = true           # Otomatis membuka antarmuka GUI layar sentuh TFT
 width = 320             # Resolusi LCD RHOS 24 TFT SPI (Landscape)
 height = 240
 fullscreen = false      # Set true untuk fullscreen di LCD SPI Raspberry Pi
-fb_device = "/dev/fb0"  # Target framebuffer LCD (/dev/fb0 atau /dev/fb1)
+fb_device = "/dev/fb1"  # Target framebuffer LCD (/dev/fb1 atau /dev/fb0)
 video_driver = "fbcon"  # Driver video Pygame/SDL (fbcon | dummy)
 
 [gui.touch]
