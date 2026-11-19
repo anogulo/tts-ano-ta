@@ -27,6 +27,7 @@ sudo apt install -y \
     python3-venv \
     alsa-utils \
     v4l-utils \
+    python3-evdev \
     evtest \
     tslib \
     libts-bin \
@@ -49,7 +50,7 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
 echo "-> [4/7] Memasang dependensi pip (piper-tts, pytesseract, onnxruntime)..."
 source .venv/bin/activate
 pip install --upgrade pip
-pip install pytesseract>=0.3.10 piper-tts>=1.2.0 onnxruntime>=1.15.0
+pip install pytesseract>=0.3.10 piper-tts>=1.2.0 onnxruntime>=1.15.0 evdev>=1.6.0
 
 # 5. Konfigurasi Izin Shutdown Aman tanpa Password (untuk tombol bantu GPIO27)
 echo "-> [5/7] Mengonfigurasi izin shutdown aman tanpa password..."
