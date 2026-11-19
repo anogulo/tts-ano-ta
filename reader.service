@@ -1,15 +1,18 @@
 [Unit]
 Description=Pembaca Tunanetra (Image to Voice) - GUI TFT
-# Tunggu sampai sistem multi-user, suara, dan framebuffer siap
 After=multi-user.target sound.target local-fs.target
-# Jangan start jika framebuffer belum ada (opsional, hapus jika tidak pakai TFT)
 
 [Service]
 User=raspy
-# Grup: audio (ALSA), video (kamera+fb), gpio (GPIO), input (touchscreen), render (DRM)
 SupplementaryGroups=audio video gpio input render
 
 WorkingDirectory=/home/raspy/TA_ANO/tts-ano-ta
+
+# Pastikan folder logs & assets dimiliki user raspy sebelum start
+ExecStartPre=/bin/mkdir -p /home/raspy/TA_ANO/tts-ano-ta/logs
+ExecStartPre=/bin/mkdir -p /home/raspy/TA_ANO/tts-ano-ta/assets
+ExecStartPre=/bin/chown -R raspy:raspy /home/raspy/TA_ANO/tts-ano-ta/logs
+ExecStartPre=/bin/chown -R raspy:raspy /home/raspy/TA_ANO/tts-ano-ta/assets
 
 # Variabel lingkungan penting untuk SDL2 + FramebufferBlitter (tanpa X11)
 Environment=PYTHONUNBUFFERED=1
@@ -22,10 +25,8 @@ Environment=HOME=/home/raspy
 
 ExecStart=/home/raspy/TA_ANO/tts-ano-ta/.venv/bin/python main.py --gui
 
-# Restart otomatis jika crash (tapi beri jeda 5 detik agar resource bebas dulu)
 Restart=always
 RestartSec=5
-# Batas resource
 TimeoutStartSec=60
 TimeoutStopSec=10
 

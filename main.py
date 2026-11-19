@@ -58,18 +58,25 @@ with open(CONFIG_PATH, 'rb') as f:
 # Pastikan folder logs dan assets tersedia
 LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets')
-os.makedirs(LOGS_DIR, exist_ok=True)
-os.makedirs(ASSETS_DIR, exist_ok=True)
+try:
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+except OSError:
+    pass
 
 # Konfigurasi logging ganda (berkas log berputar + konsol terminal)
 LOG_FILE = os.path.join(LOGS_DIR, 'reader.log')
 log = logging.getLogger('reader')
 log.setLevel(logging.INFO)
 
-# File handler
-fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
-fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-log.addHandler(fh)
+# File handler — graceful fallback ke console-only jika tidak ada izin tulis
+try:
+    fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    log.addHandler(fh)
+except (PermissionError, OSError) as _log_err:
+    print(f"[WARNING] Tidak dapat membuka file log ({LOG_FILE}): {_log_err}", flush=True)
+    print("[WARNING] Log hanya akan tampil di konsol/journalctl.", flush=True)
 
 # Console handler agar pengguna melihat proses langsung di layar
 ch = logging.StreamHandler()
