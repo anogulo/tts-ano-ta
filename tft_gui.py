@@ -801,11 +801,15 @@ class TFTGuiPygame:
             pass
 
     def _action_shutdown(self):
-        print("[GUI Action] Tombol OFF dipicu -> Langsung matikan daya total (Shutdown).", flush=True)
-        self.status_msg = "MEMATIKAN TOTAL..."
-        self.status_color = self.C_DANGER
+        """Tombol OFF: Tampilkan dialog konfirmasi sebelum shutdown total."""
+        print("[GUI Action] Tombol OFF dipicu -> Tampilkan dialog konfirmasi.", flush=True)
+        self.show_power_dialog = True
+
+    def _confirm_shutdown(self):
+        """Dikonfirmasi oleh user -> langsung shutdown total seketika."""
+        print("[GUI Action] Shutdown dikonfirmasi -> Mematikan sistem.", flush=True)
         self.show_power_dialog = False
-        self.running = False  # Hentikan loop GUI seketika agar tidak merender ulang frame
+        self.running = False  # Hentikan loop GUI seketika
 
         # Hentikan audio jika sedang aktif
         if hasattr(self.app, 'speaker') and self.app.speaker:
@@ -818,6 +822,7 @@ class TFTGuiPygame:
         if hasattr(self.app, 'busy'):
             self.app.busy = False
 
+        # Tampilkan layar hitam langsung
         if self.screen:
             self.screen.fill((0, 0, 0))
             if hasattr(self, 'font_title') and self.font_title:
@@ -830,11 +835,8 @@ class TFTGuiPygame:
             except Exception:
                 pass
 
-        # Jalankan shutdown aman langsung di thread independen (jangan melalui _run_async)
+        # Jalankan shutdown di thread independen (jangan melalui _run_async yang bisa terblokir busy)
         threading.Thread(target=self.app.safe_shutdown, daemon=False).start()
-
-    def _confirm_shutdown(self):
-        self._action_shutdown()
 
     def _confirm_exit_gui(self):
         """Keluar dari GUI dan kembali ke menu terminal."""

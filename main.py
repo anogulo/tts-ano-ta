@@ -100,61 +100,75 @@ def save_camera_device_to_config(new_device_id: int):
 
 def apply_system_volume(vol_percent: int, app_instance=None):
     """
-    Mengatur volume sistem audio secara komprehensif pada berbagai tingkatan:
-    1. Digital Software scaling: memodifikasi amplitude PCM sampel 16-bit di Speaker (boost gain hingga 2.5x).
-    2. PipeWire / PulseAudio: mengatur sink output default via pactl dengan headroom boost hingga 130%.
-    3. ALSA amixer: menyapu kartu audio (0, 1, 2, 3) dan kontrol umum dengan unmute otomatis.
+    Mengatur volume sistem audio 3-layer:
+    1. Software PCM: hanya kurangi volume di bawah 100% (di 100% biarkan mentah = paling keras).
+    2. ALSA hardware: amixer pada card yang sesuai device aplay (plughw:X,0 -> card X).
+    3. PipeWire/pactl: sebagai fallback jika sistem menggunakan PipeWire.
     """
-    vol = max(10, min(100, int(vol_percent)))
+    vol = max(0, min(100, int(vol_percent)))
 
-    # 1. Atur skala PCM dan pre-amp gain pada instans speaker
+    # 1. Atur skala PCM software pada instans speaker
     if app_instance and hasattr(app_instance, 'speaker') and app_instance.speaker:
         try:
             app_instance.speaker.set_volume(vol)
         except Exception as e:
             log.warning("Gagal mengatur volume software speaker: %s", e)
 
-    if platform.system() == "Linux":
-        # 2. PipeWire / PulseAudio via pactl (Default Raspberry Pi OS Bookworm)
-        # Petakan volume 100% ke 130% pactl agar volume speaker fisik sangat lantang
-        pactl_vol = int(vol * 1.3)
+    if platform.system() != "Linux":
+        return
+
+    # 2. Deteksi card number dari config device (plughw:2,0 -> card 2)
+    cfg_device = "plughw:2,0"
+    if app_instance and hasattr(app_instance, 'cfg') and isinstance(getattr(app_instance, 'cfg', None), dict):
+        cfg_device = app_instance.cfg.get('audio', {}).get('device', 'plughw:2,0')
+    elif 'cfg' in globals():
+        cfg_device = cfg.get('audio', {}).get('device', 'plughw:2,0')
+
+    primary_card = "2"
+    if ':' in cfg_device and ',' in cfg_device:
+        try:
+            primary_card = cfg_device.split(':')[1].split(',')[0]
+        except Exception:
+            primary_card = "2"
+
+    # Pastikan volume 100% = amixer 100% pada card yang benar
+    mixer_name = "Headphone"
+    if app_instance and hasattr(app_instance, 'cfg') and isinstance(getattr(app_instance, 'cfg', None), dict):
+        mixer_name = app_instance.cfg.get('audio', {}).get('mixer', 'Headphone')
+    elif 'cfg' in globals():
+        mixer_name = cfg.get('audio', {}).get('mixer', 'Headphone')
+
+    # Atur card utama (plughw:2,0 -> card 2 Headphone)
+    for ctrl in [mixer_name, 'Master', 'PCM']:
         try:
             subprocess.run(
-                ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{pactl_vol}%"],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
+                ['amixer', '-c', primary_card, 'sset', ctrl, f"{vol}%", 'unmute'],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0
             )
         except Exception:
             pass
 
-        # 3. ALSA mixer fallback menyapu kartu 0..3 dan kontrol umum (Master, Headphone, PCM, Speaker)
-        controls = ['Master', 'Headphone', 'PCM', 'Speaker']
-        for card in ['0', '1', '2', '3']:
-            for ctrl in controls:
-                try:
-                    subprocess.run(
-                        ['amixer', '-c', card, 'sset', ctrl, f"{vol}%", 'unmute'],
-                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
-                    )
-                except Exception:
-                    pass
-                if vol == 100:
-                    try:
-                        # Maksimalisasi analog gain di bcm2835 / USB DAC
-                        subprocess.run(
-                            ['amixer', '-c', card, 'sset', ctrl, '100%+', 'unmute'],
-                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3
-                        )
-                    except Exception:
-                        pass
-
-        for ctrl in controls:
+    # Atur card lain sebagai fallback (card 0, 1, 3)
+    for card in ['0', '1', '3']:
+        if card == primary_card:
+            continue
+        for ctrl in ['Master', 'Headphone', 'PCM', 'Speaker']:
             try:
                 subprocess.run(
-                    ['amixer', 'sset', ctrl, f"{vol}%", 'unmute'],
+                    ['amixer', '-c', card, 'sset', ctrl, f"{vol}%", 'unmute'],
                     check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                 )
             except Exception:
                 pass
+
+    # 3. PipeWire/PulseAudio (Bookworm default)
+    try:
+        subprocess.run(
+            ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol}%"],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
+        )
+    except Exception:
+        pass
 
 
 

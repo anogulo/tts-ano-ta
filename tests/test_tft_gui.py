@@ -73,10 +73,14 @@ class TestTFTGui(unittest.TestCase):
         gui._action_vol_up()
         self.assertEqual(mock_app.current_vol_idx, 2)
 
-        # Klik OFF (Langsung Shutdown Total tanpa modal via thread langsung)
+        # Klik OFF -> hanya set show_power_dialog = True (konfirmasi dulu)
         gui._action_shutdown()
+        self.assertTrue(gui.show_power_dialog, "OFF harus menampilkan dialog konfirmasi dulu")
+
+        # Konfirmasi shutdown -> barulah safe_shutdown dipanggil di thread terpisah
+        gui._confirm_shutdown()
         import time
-        time.sleep(0.05)
+        time.sleep(0.1)
         mock_app.safe_shutdown.assert_called()
 
     def test_wifi_manager_and_toggle(self):

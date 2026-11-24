@@ -32,7 +32,7 @@ class Speaker:
         self.voice = None
         self.rate = 22050  # Default Piper sample rate
         self.playing = False
-        self.volume: float = 0.8  # Skala volume PCM digital (0.05 - 1.0)
+        self.volume: float = 1.0  # Skala volume PCM digital (default 100% = tanpa modifikasi)
         self.current_sentence_idx = -1
         self.current_sentence_text = ""
         self._proc: Optional[subprocess.Popen] = None
@@ -82,30 +82,28 @@ class Speaker:
 
     def set_volume(self, vol_percent: int):
         """
-        Mengatur skala volume digital audio dengan pre-amp gain booster.
-        Model Piper TTS secara native memiliki amplitude RMS rendah (~ -18 dBFS).
-        Pada level 100% diberikan boost gain 2.5x agar suara sangat keras, lantang, dan bertenaga di speaker fisik.
+        Mengatur skala volume digital PCM.
+        Volume 100% = gain 1.0 (maksimum tanpa distorsi).
+        Volume diturunkan secara linear dari 1.0 ke 0.05.
         """
-        pct = max(10, min(100, int(vol_percent)))
-        # Kurva gain volume:
-        # 100% -> 2.50x (Sangat keras & lantang)
-        #  80% -> 1.85x (Keras normal)
-        #  60% -> 1.25x (Sedang)
-        #  40% -> 0.70x (Pelan)
-        #  20% -> 0.30x (Sangat pelan)
-        self.volume = ((pct / 100.0) ** 1.3) * 2.5
+        pct = max(0, min(100, int(vol_percent)))
+        # Skala linear langsung: 100% = 1.0, 20% = 0.20
+        self.volume = max(0.05, pct / 100.0)
 
     def _scale_pcm(self, pcm_data: bytes) -> bytes:
-        """Menerapkan penskalaan volume dan gain booster PCM 16-bit secara presisi."""
+        """
+        Menerapkan penskalaan volume PCM 16-bit.
+        Ketika volume = 1.0 (100%), kembalikan data mentah tanpa modifikasi (paling jernih).
+        Di bawah 100%: kurangi amplitude secara proporsional.
+        """
         if not pcm_data:
             return pcm_data
+        if self.volume >= 0.995:
+            return pcm_data  # 100% -> tidak dimodifikasi, biarkan hardware kontrol
         try:
             import numpy as np
             samples = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32)
-            # Terapkan penguatan digital
-            scaled = samples * self.volume
-            # Soft-clip limiter untuk menjaga audio tetap jernih tanpa distorsi kasar
-            scaled = np.clip(scaled, -32767.0, 32767.0).astype(np.int16)
+            scaled = np.clip(samples * self.volume, -32767.0, 32767.0).astype(np.int16)
             return scaled.tobytes()
         except Exception:
             return pcm_data
