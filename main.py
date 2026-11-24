@@ -132,14 +132,15 @@ def apply_system_volume(vol_percent: int, app_instance=None):
             primary_card = "2"
 
     # Pastikan volume 100% = amixer 100% pada card yang benar
-    mixer_name = "Headphone"
+    mixer_name = "Headphones"
     if app_instance and hasattr(app_instance, 'cfg') and isinstance(getattr(app_instance, 'cfg', None), dict):
-        mixer_name = app_instance.cfg.get('audio', {}).get('mixer', 'Headphone')
+        mixer_name = app_instance.cfg.get('audio', {}).get('mixer', 'Headphones')
     elif 'cfg' in globals():
-        mixer_name = cfg.get('audio', {}).get('mixer', 'Headphone')
+        mixer_name = cfg.get('audio', {}).get('mixer', 'Headphones')
 
-    # Atur card utama (plughw:2,0 -> card 2 Headphone)
-    for ctrl in [mixer_name, 'Master', 'PCM']:
+    # Atur card utama (plughw:2,0 -> card 2 Headphones / PCM)
+    candidate_ctrls = list(dict.fromkeys([mixer_name, 'Headphones', 'Headphone', 'PCM', 'Master', 'Playback']))
+    for ctrl in candidate_ctrls:
         try:
             subprocess.run(
                 ['amixer', '-c', primary_card, 'sset', ctrl, f"{vol}%", 'unmute'],
@@ -152,7 +153,7 @@ def apply_system_volume(vol_percent: int, app_instance=None):
     for card in ['0', '1', '3']:
         if card == primary_card:
             continue
-        for ctrl in ['Master', 'Headphone', 'PCM', 'Speaker']:
+        for ctrl in ['Master', 'Headphones', 'Headphone', 'PCM', 'Speaker', 'Playback']:
             try:
                 subprocess.run(
                     ['amixer', '-c', card, 'sset', ctrl, f"{vol}%", 'unmute'],
