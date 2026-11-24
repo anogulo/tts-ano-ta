@@ -101,13 +101,13 @@ def save_camera_device_to_config(new_device_id: int):
 def apply_system_volume(vol_percent: int, app_instance=None):
     """
     Mengatur volume sistem audio secara komprehensif pada berbagai tingkatan:
-    1. Digital Software scaling: memodifikasi amplitude PCM sampel 16-bit di Speaker.
-    2. PipeWire / PulseAudio: mengatur sink output default via pactl (Raspberry Pi OS Bookworm).
-    3. ALSA amixer: menyapu kartu audio (0, 1, 2, 3) dan kontrol umum (Master, Headphone, PCM, Speaker).
+    1. Digital Software scaling: memodifikasi amplitude PCM sampel 16-bit di Speaker (boost gain hingga 2.5x).
+    2. PipeWire / PulseAudio: mengatur sink output default via pactl dengan headroom boost hingga 130%.
+    3. ALSA amixer: menyapu kartu audio (0, 1, 2, 3) dan kontrol umum dengan unmute otomatis.
     """
     vol = max(10, min(100, int(vol_percent)))
 
-    # 1. Atur skala PCM pada instans speaker
+    # 1. Atur skala PCM dan pre-amp gain pada instans speaker
     if app_instance and hasattr(app_instance, 'speaker') and app_instance.speaker:
         try:
             app_instance.speaker.set_volume(vol)
@@ -116,30 +116,41 @@ def apply_system_volume(vol_percent: int, app_instance=None):
 
     if platform.system() == "Linux":
         # 2. PipeWire / PulseAudio via pactl (Default Raspberry Pi OS Bookworm)
+        # Petakan volume 100% ke 130% pactl agar volume speaker fisik sangat lantang
+        pactl_vol = int(vol * 1.3)
         try:
             subprocess.run(
-                ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol}%"],
+                ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{pactl_vol}%"],
                 check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
             )
         except Exception:
             pass
 
-        # 3. ALSA mixer fallback menyapu kartu 0..3 dan kontrol umum
+        # 3. ALSA mixer fallback menyapu kartu 0..3 dan kontrol umum (Master, Headphone, PCM, Speaker)
         controls = ['Master', 'Headphone', 'PCM', 'Speaker']
         for card in ['0', '1', '2', '3']:
             for ctrl in controls:
                 try:
                     subprocess.run(
-                        ['amixer', '-c', card, 'sset', ctrl, f"{vol}%"],
+                        ['amixer', '-c', card, 'sset', ctrl, f"{vol}%", 'unmute'],
                         check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                     )
                 except Exception:
                     pass
+                if vol == 100:
+                    try:
+                        # Maksimalisasi analog gain di bcm2835 / USB DAC
+                        subprocess.run(
+                            ['amixer', '-c', card, 'sset', ctrl, '100%+', 'unmute'],
+                            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3
+                        )
+                    except Exception:
+                        pass
 
         for ctrl in controls:
             try:
                 subprocess.run(
-                    ['amixer', 'sset', ctrl, f"{vol}%"],
+                    ['amixer', 'sset', ctrl, f"{vol}%", 'unmute'],
                     check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                 )
             except Exception:
@@ -447,8 +458,13 @@ class App:
 
     def safe_shutdown(self):
         """Mematikan sistem Raspberry Pi secara aman dan mati total (poweroff)."""
-        self.cue('mati', wait=True)
-        time.sleep(0.5)
+        log.info("Mematikan sistem Raspberry Pi (Mati Total)...")
+        try:
+            if hasattr(self, 'speaker') and self.speaker:
+                self.speaker.stop()
+            self.cue('mati', wait=False)
+        except Exception:
+            pass
 
         # Matikan layar LCD (isi frame hitam pekat) sebelum poweroff agar tidak freeze di gambar terakhir
         if hasattr(self, 'gui') and self.gui:
@@ -460,16 +476,33 @@ class App:
             except Exception:
                 pass
 
+        time.sleep(0.3)
+
         if platform.system() == "Linux":
+            # Berbagai variasi perintah shutdown untuk menjamin mati total baik dengan maupun tanpa sudo
+            shutdown_cmds = [
+                ['systemctl', 'poweroff', '-i'],               # Polkit systemd native (Bekerja tanpa sudo untuk active user)
+                ['systemctl', 'poweroff'],
+                ['sudo', '-n', '/usr/bin/systemctl', 'poweroff', '-i'],
+                ['sudo', '-n', '/usr/sbin/shutdown', '-P', 'now'],
+                ['sudo', '-n', '/sbin/poweroff'],
+                ['sudo', 'systemctl', 'poweroff', '-i'],
+                ['sudo', 'shutdown', '-P', 'now'],
+                ['sudo', 'poweroff'],
+            ]
+            for cmd in shutdown_cmds:
+                try:
+                    res = subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+                    if res.returncode == 0:
+                        break
+                except Exception:
+                    pass
+
+            # Fallback jika perintah terhalang: kirim sinyal shutdown langsung ke kernel
             try:
-                # 1. systemctl poweroff: standar systemd modern untuk mematikan daya hardware secara total
-                subprocess.run(['sudo', '/usr/bin/systemctl', 'poweroff', '-i'], check=False)
-                # 2. shutdown -P now (-P = poweroff total, BUKAN halt -h)
-                subprocess.run(['sudo', '/usr/sbin/shutdown', '-P', 'now'], check=False)
-                # 3. Fallback: poweroff langsung
-                subprocess.run(['sudo', '/sbin/poweroff'], check=False)
-            except Exception as e:
-                log.error("Gagal mengeksekusi shutdown: %s", e)
+                os.system("sync; echo 1 | sudo tee /proc/sys/kernel/sysrq 2>/dev/null; echo o | sudo tee /proc/sysrq-trigger 2>/dev/null")
+            except Exception:
+                pass
         else:
             log.info("[Mock Shutdown] Perangkat dimatikan total.")
 

@@ -801,10 +801,23 @@ class TFTGuiPygame:
             pass
 
     def _action_shutdown(self):
-        print("[GUI Action] Tombol OFF dipicu -> Langsung matikan daya total (Shutdown).")
+        print("[GUI Action] Tombol OFF dipicu -> Langsung matikan daya total (Shutdown).", flush=True)
         self.status_msg = "MEMATIKAN TOTAL..."
         self.status_color = self.C_DANGER
         self.show_power_dialog = False
+        self.running = False  # Hentikan loop GUI seketika agar tidak merender ulang frame
+
+        # Hentikan audio jika sedang aktif
+        if hasattr(self.app, 'speaker') and self.app.speaker:
+            try:
+                self.app.speaker.stop()
+            except Exception:
+                pass
+
+        # Reset flag sibuk agar shutdown tidak tertahan
+        if hasattr(self.app, 'busy'):
+            self.app.busy = False
+
         if self.screen:
             self.screen.fill((0, 0, 0))
             if hasattr(self, 'font_title') and self.font_title:
@@ -812,20 +825,16 @@ class TFTGuiPygame:
                 self.screen.blit(txt, ((self.width - txt.get_width()) // 2, (self.height - txt.get_height()) // 2))
             if self.fb_blitter:
                 self.fb_blitter.blit(self.screen)
-        self.app._run_async(self.app.safe_shutdown)
+            try:
+                pygame.display.flip()
+            except Exception:
+                pass
+
+        # Jalankan shutdown aman langsung di thread independen (jangan melalui _run_async)
+        threading.Thread(target=self.app.safe_shutdown, daemon=False).start()
 
     def _confirm_shutdown(self):
-        self.status_msg = "MEMATIKAN TOTAL..."
-        self.status_color = self.C_DANGER
-        self.show_power_dialog = False
-        if self.screen:
-            self.screen.fill((0, 0, 0))
-            if hasattr(self, 'font_title') and self.font_title:
-                txt = self.font_title.render("SISTEM DIMATIKAN TOTAL...", True, (255, 255, 255))
-                self.screen.blit(txt, ((self.width - txt.get_width()) // 2, (self.height - txt.get_height()) // 2))
-            if self.fb_blitter:
-                self.fb_blitter.blit(self.screen)
-        self.app._run_async(self.app.safe_shutdown)
+        self._action_shutdown()
 
     def _confirm_exit_gui(self):
         """Keluar dari GUI dan kembali ke menu terminal."""
@@ -1430,10 +1439,12 @@ def launch_gui(app_instance, width: int = 320, height: int = 240, fullscreen: bo
     try:
         if HAS_PYGAME:
             gui = TFTGuiPygame(app_instance, width=width, height=height, fullscreen=fullscreen, fb_device=fb_device)
+            app_instance.gui = gui
             gui.run()
         elif HAS_TKINTER:
             print("[GUI] Pygame belum terpasang, beralih ke engine Tkinter...", flush=True)
             gui = TFTGuiTkinter(app_instance, width=width, height=height)
+            app_instance.gui = gui
             gui.run()
         else:
             print("[GUI] Peringatan: Tidak ada engine GUI (pygame/tkinter) yang ditemukan.", flush=True)

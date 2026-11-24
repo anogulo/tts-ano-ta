@@ -73,9 +73,11 @@ class TestTFTGui(unittest.TestCase):
         gui._action_vol_up()
         self.assertEqual(mock_app.current_vol_idx, 2)
 
-        # Klik OFF (Langsung Shutdown Total tanpa modal)
+        # Klik OFF (Langsung Shutdown Total tanpa modal via thread langsung)
         gui._action_shutdown()
-        mock_app._run_async.assert_called_with(mock_app.safe_shutdown)
+        import time
+        time.sleep(0.05)
+        mock_app.safe_shutdown.assert_called()
 
     def test_wifi_manager_and_toggle(self):
         """Memastikan integrasi widget WiFi dan tombol sakelar WiFi bekerja dengan baik."""

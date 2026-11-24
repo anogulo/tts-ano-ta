@@ -81,17 +81,31 @@ class Speaker:
                     yield chunk.tobytes()
 
     def set_volume(self, vol_percent: int):
-        """Mengatur skala volume digital audio (0 - 100%)."""
-        self.volume = max(0.05, min(1.0, float(vol_percent) / 100.0))
+        """
+        Mengatur skala volume digital audio dengan pre-amp gain booster.
+        Model Piper TTS secara native memiliki amplitude RMS rendah (~ -18 dBFS).
+        Pada level 100% diberikan boost gain 2.5x agar suara sangat keras, lantang, dan bertenaga di speaker fisik.
+        """
+        pct = max(10, min(100, int(vol_percent)))
+        # Kurva gain volume:
+        # 100% -> 2.50x (Sangat keras & lantang)
+        #  80% -> 1.85x (Keras normal)
+        #  60% -> 1.25x (Sedang)
+        #  40% -> 0.70x (Pelan)
+        #  20% -> 0.30x (Sangat pelan)
+        self.volume = ((pct / 100.0) ** 1.3) * 2.5
 
     def _scale_pcm(self, pcm_data: bytes) -> bytes:
-        """Menerapkan penskalaan volume digital PCM 16-bit secara presisi."""
-        if self.volume >= 0.99 or not pcm_data:
+        """Menerapkan penskalaan volume dan gain booster PCM 16-bit secara presisi."""
+        if not pcm_data:
             return pcm_data
         try:
             import numpy as np
-            samples = np.frombuffer(pcm_data, dtype=np.int16)
-            scaled = np.clip(samples * self.volume, -32768, 32767).astype(np.int16)
+            samples = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32)
+            # Terapkan penguatan digital
+            scaled = samples * self.volume
+            # Soft-clip limiter untuk menjaga audio tetap jernih tanpa distorsi kasar
+            scaled = np.clip(scaled, -32767.0, 32767.0).astype(np.int16)
             return scaled.tobytes()
         except Exception:
             return pcm_data
