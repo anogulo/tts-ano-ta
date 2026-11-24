@@ -27,15 +27,17 @@ sudo apt install -y \
     python3-venv \
     alsa-utils \
     v4l-utils \
+    rfkill \
+    wireless-tools \
     python3-evdev \
     evtest \
     tslib \
     libts-bin \
     git
-
-# 2. Tambahkan user ke grup hardware (audio, video, gpio)
+ 
+# 2. Tambahkan user ke grup hardware (audio, video, gpio, netdev)
 echo "-> [2/7] Mengonfigurasi hak akses grup pengguna ($USER)..."
-sudo usermod -a -G audio,video,gpio $USER
+sudo usermod -a -G audio,video,gpio,netdev $USER
 
 # 3. Buat Virtual Environment dengan akses pustaka sistem (NEON-accelerated)
 echo "-> [3/7] Membuat virtual environment Python (.venv)..."

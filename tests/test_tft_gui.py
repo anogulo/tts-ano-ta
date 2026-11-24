@@ -73,6 +73,26 @@ class TestTFTGui(unittest.TestCase):
         gui._action_vol_up()
         self.assertEqual(mock_app.current_vol_idx, 2)
 
+        # Klik OFF (Langsung Shutdown Total tanpa modal)
+        gui._action_shutdown()
+        mock_app._run_async.assert_called_with(mock_app.safe_shutdown)
+
+    def test_wifi_manager_and_toggle(self):
+        """Memastikan integrasi widget WiFi dan tombol sakelar WiFi bekerja dengan baik."""
+        mock_app = MagicMock()
+        mock_app.busy = False
+        gui = tft_gui.TFTGuiPygame(mock_app, width=320, height=240)
+
+        self.assertIsNotNone(gui.wifi_mgr)
+        self.assertTrue(hasattr(gui, "wifi_btn_rect"))
+        self.assertEqual(gui.wifi_btn_rect.x, 10)
+        self.assertEqual(gui.wifi_btn_rect.y, 135)
+
+        # Uji toggle WiFi
+        init_state = gui.wifi_mgr.enabled
+        gui._action_toggle_wifi()
+        self.assertEqual(gui.wifi_mgr.enabled, not init_state)
+
 
 if __name__ == '__main__':
     unittest.main()

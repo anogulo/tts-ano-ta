@@ -32,6 +32,7 @@ class Speaker:
         self.voice = None
         self.rate = 22050  # Default Piper sample rate
         self.playing = False
+        self.volume: float = 0.8  # Skala volume PCM digital (0.05 - 1.0)
         self.current_sentence_idx = -1
         self.current_sentence_text = ""
         self._proc: Optional[subprocess.Popen] = None
@@ -78,6 +79,22 @@ class Speaker:
                     yield chunk
                 elif hasattr(chunk, 'tobytes'):
                     yield chunk.tobytes()
+
+    def set_volume(self, vol_percent: int):
+        """Mengatur skala volume digital audio (0 - 100%)."""
+        self.volume = max(0.05, min(1.0, float(vol_percent) / 100.0))
+
+    def _scale_pcm(self, pcm_data: bytes) -> bytes:
+        """Menerapkan penskalaan volume digital PCM 16-bit secara presisi."""
+        if self.volume >= 0.99 or not pcm_data:
+            return pcm_data
+        try:
+            import numpy as np
+            samples = np.frombuffer(pcm_data, dtype=np.int16)
+            scaled = np.clip(samples * self.volume, -32768, 32767).astype(np.int16)
+            return scaled.tobytes()
+        except Exception:
+            return pcm_data
 
     def cue(self, path: str, wait: bool = False):
         """
@@ -185,6 +202,7 @@ class Speaker:
                         first_audio_called = True
 
                     pcm_data = b''.join(pcm_chunks)
+                    pcm_data = self._scale_pcm(pcm_data)
 
                     self._proc = subprocess.Popen(
                         [
@@ -244,6 +262,7 @@ class Speaker:
                         first_audio_called = True
 
                     pcm_data = b''.join(pcm_chunks)
+                    pcm_data = self._scale_pcm(pcm_data)
                     # Putar via wave buffer
                     self._play_pcm_buffer(pcm_data)
 

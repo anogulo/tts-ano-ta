@@ -55,6 +55,17 @@ try:
 except ImportError:
     HAS_EVDEV = False
 
+# Pengelola WiFi & Kontrol Volume Komprehensif
+try:
+    from wifi_manager import WiFiManager
+except ImportError:
+    WiFiManager = None
+
+try:
+    from main import apply_system_volume
+except ImportError:
+    apply_system_volume = None
+
 # Class Rect helper agar tombol sentuh dapat didefinisikan tanpa ketergantungan Pygame
 class SimpleRect:
     def __init__(self, x, y, w, h):
@@ -467,6 +478,11 @@ class TFTGuiPygame:
         self._cached_reading_hash = None
         self._cached_wrapped_items = []
 
+        # Pengelola WiFi & Tombol Sentuh WiFi
+        self.wifi_mgr = WiFiManager() if WiFiManager is not None else None
+        rect_factory = pygame.Rect if HAS_PYGAME else SimpleRect
+        self.wifi_btn_rect = rect_factory(10, 135, 110, 24)
+
         # Inisialisasi tombol sentuh
         self.buttons = {}
         self.modal_buttons = {}
@@ -740,33 +756,63 @@ class TFTGuiPygame:
         elif hasattr(self.app, '_run_async') and hasattr(self.app, 'cycle_volume'):
             self.app._run_async(self.app.cycle_volume)
 
+    def _action_toggle_wifi(self):
+        """Membalik status sakelar radio WiFi (ON -> OFF atau sebaliknya)."""
+        print("[GUI Action] Tombol WiFi ditekan -> alihkan status WiFi.")
+        if not self.wifi_mgr:
+            return
+        new_state = self.wifi_mgr.toggle_wifi()
+        self.status_msg = "WIFI AKTIF" if new_state else "WIFI MATI"
+        self.status_color = self.C_PRIMARY if new_state else self.C_DANGER
+        try:
+            self.app.cue('klik')
+        except Exception:
+            pass
+
     def _apply_volume_hardware(self, vol_percent: int):
-        if sys.platform.startswith("linux"):
-            mixer = "Headphone"
-            card = "2"
-            if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict):
-                mixer = self.app.cfg.get('audio', {}).get('mixer', 'Headphone')
-                dev = self.app.cfg.get('audio', {}).get('device', 'plughw:2,0')
-                if ':' in dev and ',' in dev:
-                    try:
-                        card = dev.split(':')[1].split(',')[0]
-                    except Exception:
-                        card = '2'
-            try:
-                subprocess.run(
-                    ['amixer', '-c', card, 'sset', mixer, f"{vol_percent}%"],
-                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            except Exception:
-                pass
+        if apply_system_volume is not None:
+            apply_system_volume(vol_percent, self.app)
+        else:
+            if hasattr(self.app, 'speaker') and self.app.speaker:
+                try:
+                    self.app.speaker.set_volume(vol_percent)
+                except Exception:
+                    pass
+            if sys.platform.startswith("linux"):
+                try:
+                    subprocess.run(
+                        ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol_percent}%"],
+                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
+                    )
+                except Exception:
+                    pass
+                for card in ['0', '1', '2', '3']:
+                    for ctrl in ['Master', 'Headphone', 'PCM', 'Speaker']:
+                        try:
+                            subprocess.run(
+                                ['amixer', '-c', card, 'sset', ctrl, f"{vol_percent}%"],
+                                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
+                            )
+                        except Exception:
+                            pass
         try:
             self.app.cue('klik')
         except Exception:
             pass
 
     def _action_shutdown(self):
-        print("[GUI Action] Tombol OFF dipicu -> Buka dialog konfirmasi daya.")
-        self.show_power_dialog = True
+        print("[GUI Action] Tombol OFF dipicu -> Langsung matikan daya total (Shutdown).")
+        self.status_msg = "MEMATIKAN TOTAL..."
+        self.status_color = self.C_DANGER
+        self.show_power_dialog = False
+        if self.screen:
+            self.screen.fill((0, 0, 0))
+            if hasattr(self, 'font_title') and self.font_title:
+                txt = self.font_title.render("SISTEM DIMATIKAN TOTAL...", True, (255, 255, 255))
+                self.screen.blit(txt, ((self.width - txt.get_width()) // 2, (self.height - txt.get_height()) // 2))
+            if self.fb_blitter:
+                self.fb_blitter.blit(self.screen)
+        self.app._run_async(self.app.safe_shutdown)
 
     def _confirm_shutdown(self):
         self.status_msg = "MEMATIKAN TOTAL..."
@@ -832,13 +878,13 @@ class TFTGuiPygame:
             if hasattr(self.app, '_preview_reconnect_at'):
                 if now < self.app._preview_reconnect_at:
                     # Tampilkan placeholder "MENGHUBUNGKAN..."
-                    surf = pygame.Surface((110, 80))
+                    surf = pygame.Surface((110, 58))
                     surf.fill((15, 23, 42))
-                    pygame.draw.rect(surf, (51, 65, 85), pygame.Rect(1, 1, 108, 78), border_radius=4)
+                    pygame.draw.rect(surf, (51, 65, 85), pygame.Rect(1, 1, 108, 56), border_radius=4)
                     txt1 = self.font_stats.render("MENGHUBUNGKAN", True, self.C_WARNING)
                     txt2 = self.font_stats.render("KAMERA...", True, self.C_TEXT_MUTED)
-                    surf.blit(txt1, ((110 - txt1.get_width()) // 2, 28))
-                    surf.blit(txt2, ((110 - txt2.get_width()) // 2, 42))
+                    surf.blit(txt1, ((110 - txt1.get_width()) // 2, 16))
+                    surf.blit(txt2, ((110 - txt2.get_width()) // 2, 32))
                     self.last_preview_surface = surf
                     return
 
@@ -855,19 +901,19 @@ class TFTGuiPygame:
             except Exception:
                 pass
 
-            surf = pygame.Surface((110, 80))
+            surf = pygame.Surface((110, 58))
             surf.fill((15, 23, 42))
-            pygame.draw.rect(surf, (51, 65, 85), pygame.Rect(1, 1, 108, 78), border_radius=4)
+            pygame.draw.rect(surf, (51, 65, 85), pygame.Rect(1, 1, 108, 56), border_radius=4)
             txt = self.font_stats.render("KAMERA OFFLINE", True, self.C_DANGER)
             txt2 = self.font_stats.render("MENGHUBUNGKAN", True, self.C_TEXT_MUTED)
-            surf.blit(txt, ((110 - txt.get_width()) // 2, 26))
-            surf.blit(txt2, ((110 - txt2.get_width()) // 2, 42))
+            surf.blit(txt, ((110 - txt.get_width()) // 2, 16))
+            surf.blit(txt2, ((110 - txt2.get_width()) // 2, 32))
             self.last_preview_surface = surf
             return
 
-        # Konversi frame BGR → RGB, resize menjadi thumbnail 110x80
+        # Konversi frame BGR → RGB, resize menjadi thumbnail 110x58
         try:
-            thumb = cv2.resize(frame, (110, 80), interpolation=cv2.INTER_AREA)
+            thumb = cv2.resize(frame, (110, 58), interpolation=cv2.INTER_AREA)
             thumb_rgb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
             # Rotasi 90° agar orientasi portrait sensor sesuai landscape LCD
             thumb_rgb = np.rot90(thumb_rgb)
@@ -913,18 +959,26 @@ class TFTGuiPygame:
                     else:
                         # Cek setiap tombol utama di baris bawah dengan zona sentuh ramah jari (mencakup hingga tepi bawah y=240)
                         handled = False
-                        for name, btn in self.buttons.items():
-                            if name == "vol":
-                                continue
-                            b_r = btn["rect"]
-                            hit_rect = pygame.Rect(b_r.x - 2, 162, b_r.width + 4, 78)
-                            if hit_rect.collidepoint(pos):
-                                print(f"[GUI Event] Tombol [{btn['label']}] DITEKAN pada koordinat ({px}, {py})")
-                                self.pressed_button = name
-                                self.pressed_until = time.time() + 0.25
-                                btn["action"]()
-                                handled = True
-                                break
+
+                        # Deteksi sentuhan pada tombol sakelar WiFi di Card Kiri
+                        if hasattr(self, 'wifi_btn_rect') and self.wifi_btn_rect.inflate(6, 6).collidepoint(pos):
+                            print(f"[GUI Event] Tombol [WIFI TOGGLE] DITEKAN pada koordinat ({px}, {py})")
+                            self._action_toggle_wifi()
+                            handled = True
+
+                        if not handled:
+                            for name, btn in self.buttons.items():
+                                if name == "vol":
+                                    continue
+                                b_r = btn["rect"]
+                                hit_rect = pygame.Rect(b_r.x - 2, 162, b_r.width + 4, 78)
+                                if hit_rect.collidepoint(pos):
+                                    print(f"[GUI Event] Tombol [{btn['label']}] DITEKAN pada koordinat ({px}, {py})")
+                                    self.pressed_button = name
+                                    self.pressed_until = time.time() + 0.25
+                                    btn["action"]()
+                                    handled = True
+                                    break
 
                         if not handled:
                             print(f"[GUI Event] Sentuhan di ({px}, {py}) berada di luar area tombol.")
@@ -988,29 +1042,67 @@ class TFTGuiPygame:
             st_x = self.width - status_surf.get_width() - 8
             self.screen.blit(status_surf, (st_x, 7))
 
-            # --- B. Kartu Kiri: Pratinjau Kamera (118 x 136) ---
+            # --- B. Kartu Kiri: Pratinjau Kamera & Widget WiFi (118 x 136) ---
             card_cam = pygame.Rect(6, 30, 118, 136)
             pygame.draw.rect(self.screen, self.C_CARD, card_cam, border_radius=6)
             pygame.draw.rect(self.screen, self.C_CARD_BORDER, card_cam, width=1, border_radius=6)
 
             self.update_preview_surface()
             if self.last_preview_surface:
-                self.screen.blit(self.last_preview_surface, (10, 34))
+                self.screen.blit(self.last_preview_surface, (10, 33))
 
-            # Info kamera & volume di bawah thumbnail
+            # Info kamera & volume di bawah thumbnail (y=92)
             cam_dev = self.app.cfg.get('camera', {}).get('device', '?') if isinstance(getattr(self.app, 'cfg', None), dict) else '?'
-            if cam_alive:
-                stats_cam = f"CAM:{cam_dev} 1080p"
-                cam_lbl_col = self.C_TEXT_MUTED
-            else:
-                stats_cam = f"CAM:{cam_dev} OFFLINE"
-                cam_lbl_col = self.C_DANGER
-            lbl_cam = self.font_stats.render(stats_cam, True, cam_lbl_col)
-            self.screen.blit(lbl_cam, (12, 118))
+            cam_txt = f"CAM:{cam_dev}" if cam_alive else "CAM:OFF"
+            vol_val = self.app.volume_steps[self.app.current_vol_idx] if hasattr(self.app, 'volume_steps') and hasattr(self.app, 'current_vol_idx') else 80
+            top_info = f"{cam_txt} | VOL:{vol_val}%"
+            lbl_top = self.font_stats.render(top_info, True, self.C_ACCENT if cam_alive else self.C_DANGER)
+            self.screen.blit(lbl_top, (10, 92))
 
-            vol_val = self.app.volume_steps[self.app.current_vol_idx]
-            lbl_vol_info = self.font_stats.render(f"AUDIO: {vol_val}%", True, self.C_ACCENT)
-            self.screen.blit(lbl_vol_info, (12, 134))
+            # Garis pemisah halus (y=104)
+            pygame.draw.line(self.screen, self.C_CARD_BORDER, (10, 104), (120, 104), 1)
+
+            # Status WiFi & IP
+            wifi_on = True
+            wifi_conn = False
+            wifi_ssid = "WiFi"
+            wifi_ip = "-"
+            if self.wifi_mgr:
+                wifi_on, wifi_conn, wifi_ssid, wifi_ip = self.wifi_mgr.get_info()
+
+            # Baris 1 WiFi: SSID / Status Radio (y=107)
+            if not wifi_on:
+                ssid_txt = "WiFi: MATI"
+                ssid_col = self.C_DANGER
+            elif wifi_conn:
+                display_ssid = wifi_ssid if len(wifi_ssid) <= 12 else (wifi_ssid[:10] + "..")
+                ssid_txt = f"📶 {display_ssid}"
+                ssid_col = self.C_PRIMARY
+            else:
+                display_ssid = wifi_ssid if len(wifi_ssid) <= 12 else (wifi_ssid[:10] + "..")
+                ssid_txt = f"📶 {display_ssid}"
+                ssid_col = self.C_WARNING
+
+            lbl_ssid = self.font_stats.render(ssid_txt, True, ssid_col)
+            self.screen.blit(lbl_ssid, (10, 107))
+
+            # Baris 2 WiFi: Alamat IP Lokal (y=120)
+            ip_txt = f"IP: {wifi_ip}"
+            ip_col = self.C_INFO if (wifi_conn and wifi_ip != "-") else self.C_TEXT_MUTED
+            lbl_ip = self.font_stats.render(ip_txt, True, ip_col)
+            self.screen.blit(lbl_ip, (10, 120))
+
+            # Tombol Sentuh WiFi ON / OFF (y=135..159, tinggi 24px)
+            w_btn_rect = getattr(self, 'wifi_btn_rect', pygame.Rect(10, 135, 110, 24))
+            w_btn_bg = (16, 120, 80) if wifi_on else (120, 28, 28)
+            w_btn_border = (52, 211, 153) if wifi_on else (248, 113, 113)
+            pygame.draw.rect(self.screen, w_btn_bg, w_btn_rect, border_radius=4)
+            pygame.draw.rect(self.screen, w_btn_border, w_btn_rect, width=1, border_radius=4)
+
+            w_btn_lbl = self.font_btn.render("WIFI: ON" if wifi_on else "WIFI: OFF", True, (255, 255, 255))
+            wx = w_btn_rect.x + (w_btn_rect.width - w_btn_lbl.get_width()) // 2
+            wy = w_btn_rect.y + (w_btn_rect.height - w_btn_lbl.get_height()) // 2
+            self.screen.blit(w_btn_lbl, (wx, wy))
 
             # --- C. Kartu Kanan: Cuplikan Teks Bacaan (186 x 136) dengan Auto-Scroll & Voice Sync ---
             card_txt = pygame.Rect(128, 30, 186, 136)

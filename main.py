@@ -98,6 +98,54 @@ def save_camera_device_to_config(new_device_id: int):
         log.warning("Gagal memperbarui config.toml: %s", e)
 
 
+def apply_system_volume(vol_percent: int, app_instance=None):
+    """
+    Mengatur volume sistem audio secara komprehensif pada berbagai tingkatan:
+    1. Digital Software scaling: memodifikasi amplitude PCM sampel 16-bit di Speaker.
+    2. PipeWire / PulseAudio: mengatur sink output default via pactl (Raspberry Pi OS Bookworm).
+    3. ALSA amixer: menyapu kartu audio (0, 1, 2, 3) dan kontrol umum (Master, Headphone, PCM, Speaker).
+    """
+    vol = max(10, min(100, int(vol_percent)))
+
+    # 1. Atur skala PCM pada instans speaker
+    if app_instance and hasattr(app_instance, 'speaker') and app_instance.speaker:
+        try:
+            app_instance.speaker.set_volume(vol)
+        except Exception as e:
+            log.warning("Gagal mengatur volume software speaker: %s", e)
+
+    if platform.system() == "Linux":
+        # 2. PipeWire / PulseAudio via pactl (Default Raspberry Pi OS Bookworm)
+        try:
+            subprocess.run(
+                ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol}%"],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
+            )
+        except Exception:
+            pass
+
+        # 3. ALSA mixer fallback menyapu kartu 0..3 dan kontrol umum
+        controls = ['Master', 'Headphone', 'PCM', 'Speaker']
+        for card in ['0', '1', '2', '3']:
+            for ctrl in controls:
+                try:
+                    subprocess.run(
+                        ['amixer', '-c', card, 'sset', ctrl, f"{vol}%"],
+                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
+                    )
+                except Exception:
+                    pass
+
+        for ctrl in controls:
+            try:
+                subprocess.run(
+                    ['amixer', 'sset', ctrl, f"{vol}%"],
+                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
+                )
+            except Exception:
+                pass
+
+
 
 class MockButton:
     """Mock Button untuk lingkungan pengujian non-Raspberry Pi."""
@@ -178,8 +226,12 @@ class App:
         self._aux_held = False
 
         # Volume levels
-        self.volume_steps = cfg['audio'].get('volume_steps', [40, 60, 80, 100])
-        self.current_vol_idx = 2  # Default: 80%
+        self.volume_steps = cfg['audio'].get('volume_steps', [20, 40, 60, 80, 100])
+        self.current_vol_idx = 3 if len(self.volume_steps) > 3 else (len(self.volume_steps) - 1)  # Default: 80%
+        try:
+            apply_system_volume(self.volume_steps[self.current_vol_idx], self)
+        except Exception:
+            pass
 
         # Kaitkan event tombol utama (FR-01)
         self.btn_main.when_pressed = self.on_main_press
@@ -379,31 +431,11 @@ class App:
             self._run_async(self.cycle_volume)
 
     def cycle_volume(self):
-        """Menaikkan volume (40%, 60%, 80%, 100%, lalu kembali ke 40%)."""
+        """Menaikkan volume siklis (20%, 40%, 60%, 80%, 100%)."""
         self.current_vol_idx = (self.current_vol_idx + 1) % len(self.volume_steps)
         new_vol = self.volume_steps[self.current_vol_idx]
         log.info("Mengatur volume ke %d%%", new_vol)
-
-        # Atur ALSA mixer jika di Linux
-        if platform.system() == "Linux":
-            mixer = cfg['audio'].get('mixer', 'Headphone')
-            dev_str = cfg['audio'].get('device', 'plughw:2,0')
-            card_num = '2'
-            if ':' in dev_str and ',' in dev_str:
-                try:
-                    card_num = dev_str.split(':')[1].split(',')[0]
-                except Exception:
-                    card_num = '2'
-            try:
-                subprocess.run(
-                    ['amixer', '-c', card_num, 'sset', mixer, f"{new_vol}%"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-            except Exception as e:
-                log.warning("Gagal mengatur amixer: %s", e)
-
+        apply_system_volume(new_vol, self)
         # Beri feedback nada klik pada volume baru
         self.cue('klik', wait=True)
 
