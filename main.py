@@ -41,7 +41,7 @@ from ocr_pipeline import (
     to_gray,
     to_sentences
 )
-from speech import Speaker
+from speech import Speaker, apply_system_volume
 from terminal_view import (
     print_camera_snapshot,
     scan_cameras,
@@ -69,19 +69,20 @@ LOG_FILE = os.path.join(LOGS_DIR, 'reader.log')
 log = logging.getLogger('reader')
 log.setLevel(logging.INFO)
 
-# File handler — graceful fallback ke console-only jika tidak ada izin tulis
-try:
-    fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
-    fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-    log.addHandler(fh)
-except (PermissionError, OSError) as _log_err:
-    print(f"[WARNING] Tidak dapat membuka file log ({LOG_FILE}): {_log_err}", flush=True)
-    print("[WARNING] Log hanya akan tampil di konsol/journalctl.", flush=True)
+if not log.handlers:
+    # File handler — graceful fallback ke console-only jika tidak ada izin tulis
+    try:
+        fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+        fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+        log.addHandler(fh)
+    except (PermissionError, OSError) as _log_err:
+        print(f"[WARNING] Tidak dapat membuka file log ({LOG_FILE}): {_log_err}", flush=True)
+        print("[WARNING] Log hanya akan tampil di konsol/journalctl.", flush=True)
 
-# Console handler agar pengguna melihat proses langsung di layar
-ch = logging.StreamHandler()
-ch.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
-log.addHandler(ch)
+    # Console handler agar pengguna melihat proses langsung di layar
+    ch = logging.StreamHandler()
+    ch.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+    log.addHandler(ch)
 
 
 def save_camera_device_to_config(new_device_id: int):
@@ -96,80 +97,6 @@ def save_camera_device_to_config(new_device_id: int):
         log.info("Konfigurasi camera.device diperbarui ke %d di config.toml", new_device_id)
     except Exception as e:
         log.warning("Gagal memperbarui config.toml: %s", e)
-
-
-def apply_system_volume(vol_percent: int, app_instance=None):
-    """
-    Mengatur volume sistem audio 3-layer:
-    1. Software PCM: hanya kurangi volume di bawah 100% (di 100% biarkan mentah = paling keras).
-    2. ALSA hardware: amixer pada card yang sesuai device aplay (plughw:X,0 -> card X).
-    3. PipeWire/pactl: sebagai fallback jika sistem menggunakan PipeWire.
-    """
-    vol = max(0, min(100, int(vol_percent)))
-
-    # 1. Atur skala PCM software pada instans speaker
-    if app_instance and hasattr(app_instance, 'speaker') and app_instance.speaker:
-        try:
-            app_instance.speaker.set_volume(vol)
-        except Exception as e:
-            log.warning("Gagal mengatur volume software speaker: %s", e)
-
-    if platform.system() != "Linux":
-        return
-
-    # 2. Deteksi card number dari config device (plughw:2,0 -> card 2)
-    cfg_device = "plughw:2,0"
-    if app_instance and hasattr(app_instance, 'cfg') and isinstance(getattr(app_instance, 'cfg', None), dict):
-        cfg_device = app_instance.cfg.get('audio', {}).get('device', 'plughw:2,0')
-    elif 'cfg' in globals():
-        cfg_device = cfg.get('audio', {}).get('device', 'plughw:2,0')
-
-    primary_card = "2"
-    if ':' in cfg_device and ',' in cfg_device:
-        try:
-            primary_card = cfg_device.split(':')[1].split(',')[0]
-        except Exception:
-            primary_card = "2"
-
-    # Pastikan volume 100% = amixer 100% pada card yang benar
-    mixer_name = "Headphones"
-    if app_instance and hasattr(app_instance, 'cfg') and isinstance(getattr(app_instance, 'cfg', None), dict):
-        mixer_name = app_instance.cfg.get('audio', {}).get('mixer', 'Headphones')
-    elif 'cfg' in globals():
-        mixer_name = cfg.get('audio', {}).get('mixer', 'Headphones')
-
-    # Atur card utama (plughw:2,0 -> card 2 Headphones / PCM)
-    candidate_ctrls = list(dict.fromkeys([mixer_name, 'Headphones', 'Headphone', 'PCM', 'Master', 'Playback']))
-    for ctrl in candidate_ctrls:
-        try:
-            subprocess.run(
-                ['amixer', '-c', primary_card, 'sset', ctrl, f"{vol}%", 'unmute'],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0
-            )
-        except Exception:
-            pass
-
-    # Atur card lain sebagai fallback (card 0, 1, 3)
-    for card in ['0', '1', '3']:
-        if card == primary_card:
-            continue
-        for ctrl in ['Master', 'Headphones', 'Headphone', 'PCM', 'Speaker', 'Playback']:
-            try:
-                subprocess.run(
-                    ['amixer', '-c', card, 'sset', ctrl, f"{vol}%", 'unmute'],
-                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
-                )
-            except Exception:
-                pass
-
-    # 3. PipeWire/PulseAudio (Bookworm default)
-    try:
-        subprocess.run(
-            ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol}%"],
-            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
-        )
-    except Exception:
-        pass
 
 
 
@@ -471,13 +398,13 @@ class App:
             return getattr(self.speaker, 'current_sentence_idx', -1)
         return -1
 
-    def safe_shutdown(self):
+    def safe_shutdown(self) -> bool:
         """Mematikan sistem Raspberry Pi secara aman dan mati total (poweroff)."""
         log.info("Mematikan sistem Raspberry Pi (Mati Total)...")
         try:
             if hasattr(self, 'speaker') and self.speaker:
                 self.speaker.stop()
-            self.cue('mati', wait=False)
+            self.cue('mati', wait=True)
         except Exception:
             pass
 
@@ -486,40 +413,95 @@ class App:
             try:
                 if hasattr(self.gui, 'screen') and self.gui.screen:
                     self.gui.screen.fill((0, 0, 0))
-                    if hasattr(self.gui, 'fb_blitter') and self.gui.fb_blitter:
+                    if hasattr(self.gui, 'fb_blitter') and self.gui.fb_blitter and self.gui.fb_blitter.enabled:
                         self.gui.fb_blitter.blit(self.gui.screen)
             except Exception:
                 pass
 
-        time.sleep(0.3)
+        time.sleep(0.15)
 
-        if platform.system() == "Linux":
-            # Berbagai variasi perintah shutdown untuk menjamin mati total baik dengan maupun tanpa sudo
-            shutdown_cmds = [
-                ['systemctl', 'poweroff', '-i'],               # Polkit systemd native (Bekerja tanpa sudo untuk active user)
-                ['systemctl', 'poweroff'],
-                ['sudo', '-n', '/usr/bin/systemctl', 'poweroff', '-i'],
-                ['sudo', '-n', '/usr/sbin/shutdown', '-P', 'now'],
-                ['sudo', '-n', '/sbin/poweroff'],
-                ['sudo', 'systemctl', 'poweroff', '-i'],
-                ['sudo', 'shutdown', '-P', 'now'],
-                ['sudo', 'poweroff'],
-            ]
-            for cmd in shutdown_cmds:
-                try:
-                    res = subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
-                    if res.returncode == 0:
-                        break
-                except Exception:
-                    pass
-
-            # Fallback jika perintah terhalang: kirim sinyal shutdown langsung ke kernel
-            try:
-                os.system("sync; echo 1 | sudo tee /proc/sys/kernel/sysrq 2>/dev/null; echo o | sudo tee /proc/sysrq-trigger 2>/dev/null")
-            except Exception:
-                pass
-        else:
+        if platform.system() != "Linux":
             log.info("[Mock Shutdown] Perangkat dimatikan total.")
+            return True
+
+        is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+        systemctl_bins = [p for p in dict.fromkeys([shutil.which("systemctl"), "/usr/bin/systemctl", "/bin/systemctl"]) if p and os.path.exists(p)]
+        shutdown_bins = [p for p in dict.fromkeys([shutil.which("shutdown"), "/usr/sbin/shutdown", "/sbin/shutdown"]) if p and os.path.exists(p)]
+        poweroff_bins = [p for p in dict.fromkeys([shutil.which("poweroff"), "/usr/sbin/poweroff", "/sbin/poweroff"]) if p and os.path.exists(p)]
+
+        shutdown_cmds = []
+        if is_root:
+            for b in systemctl_bins:
+                shutdown_cmds.append([b, "poweroff", "-i"])
+                shutdown_cmds.append([b, "poweroff"])
+            for b in shutdown_bins:
+                shutdown_cmds.append([b, "-P", "now"])
+                shutdown_cmds.append([b, "-h", "now"])
+            for b in poweroff_bins:
+                shutdown_cmds.append([b])
+        else:
+            # Gunakan sudo -n (non-interactive) terlebih dahulu agar tidak pernah hang menunggu password
+            for b in systemctl_bins:
+                shutdown_cmds.append(["sudo", "-n", b, "poweroff", "-i"])
+                shutdown_cmds.append(["sudo", "-n", b, "poweroff"])
+            for b in shutdown_bins:
+                shutdown_cmds.append(["sudo", "-n", b, "-P", "now"])
+                shutdown_cmds.append(["sudo", "-n", b, "-h", "now"])
+            for b in poweroff_bins:
+                shutdown_cmds.append(["sudo", "-n", b])
+            # Polkit systemd native (bekerja pada sesi login lokal aktif)
+            for b in systemctl_bins:
+                shutdown_cmds.append([b, "poweroff", "-i"])
+                shutdown_cmds.append([b, "poweroff"])
+            if shutil.which("dbus-send"):
+                shutdown_cmds.append([
+                    "dbus-send", "--system", "--print-reply",
+                    "--dest=org.freedesktop.login1", "/org/freedesktop/login1",
+                    "org.freedesktop.login1.Manager.PowerOff", "boolean:true"
+                ])
+
+        errors = []
+        for cmd in shutdown_cmds:
+            try:
+                res = subprocess.run(
+                    cmd,
+                    check=False,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    timeout=3.0,
+                )
+                if res.returncode == 0:
+                    log.info("Perintah shutdown berhasil dieksekusi: %s", " ".join(cmd))
+                    return True
+                err_msg = (res.stderr or res.stdout or "").strip()
+                errors.append(f"{' '.join(cmd)} -> rc={res.returncode} ({err_msg})")
+            except Exception as e:
+                errors.append(f"{' '.join(cmd)} -> {e}")
+
+        # Fallback non-interaktif ke kernel sysrq jika semua perintah userspace gagal
+        try:
+            sysrq_cmd = (
+                ["sh", "-c", "sync; echo 1 > /proc/sys/kernel/sysrq && echo o > /proc/sysrq-trigger"]
+                if is_root
+                else ["sudo", "-n", "sh", "-c", "sync; echo 1 > /proc/sys/kernel/sysrq && echo o > /proc/sysrq-trigger"]
+            )
+            res = subprocess.run(
+                sysrq_cmd,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+            if res.returncode == 0:
+                log.info("Shutdown kernel sysrq berhasil dipicu.")
+                return True
+        except Exception as e:
+            errors.append(f"sysrq -> {e}")
+
+        log.error("Semua perintah shutdown gagal! Periksa izin sudoers (/etc/sudoers.d/reader_shutdown). Detail: %s", "; ".join(errors[:4]))
+        return False
 
     # ================= Alur Pemrosesan Inti =================
     def _run_async(self, fn):

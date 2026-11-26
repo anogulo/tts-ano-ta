@@ -35,9 +35,11 @@ sudo apt install -y \
     libts-bin \
     git
  
-# 2. Tambahkan user ke grup hardware (audio, video, gpio, netdev)
-echo "-> [2/7] Mengonfigurasi hak akses grup pengguna ($USER)..."
-sudo usermod -a -G audio,video,gpio,netdev $USER
+TARGET_USER="${SUDO_USER:-$USER}"
+
+# 2. Tambahkan user ke grup hardware (audio, video, gpio, input, render, netdev)
+echo "-> [2/7] Mengonfigurasi hak akses grup pengguna ($TARGET_USER)..."
+sudo usermod -a -G audio,video,gpio,input,render,netdev "$TARGET_USER"
 
 # 3. Buat Virtual Environment dengan akses pustaka sistem (NEON-accelerated)
 echo "-> [3/7] Membuat virtual environment Python (.venv)..."
@@ -55,8 +57,8 @@ pip install --upgrade pip
 pip install pytesseract>=0.3.10 piper-tts>=1.2.0 onnxruntime>=1.15.0 evdev>=1.6.0
 
 # 5. Konfigurasi Izin Shutdown Aman tanpa Password (untuk tombol bantu GPIO27 & tombol OFF GUI)
-echo "-> [5/7] Mengonfigurasi izin shutdown aman tanpa password..."
-sudo bash -c "echo '$USER ALL=(root) NOPASSWD: /usr/sbin/shutdown, /usr/bin/systemctl poweroff*, /sbin/poweroff, /usr/sbin/poweroff' > /etc/sudoers.d/reader_shutdown"
+echo "-> [5/7] Mengonfigurasi izin shutdown aman tanpa password untuk $TARGET_USER..."
+sudo bash -c "echo '$TARGET_USER ALL=(root) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown, /bin/systemctl poweroff*, /usr/bin/systemctl poweroff*, /sbin/poweroff, /usr/sbin/poweroff' > /etc/sudoers.d/reader_shutdown"
 sudo chmod 0440 /etc/sudoers.d/reader_shutdown
 
 # 6. Generate dan Verifikasi Aset Audio Status (*.wav)
@@ -72,7 +74,10 @@ CURRENT_DIR=$(pwd)
 sudo cp reader.service $SERVICE_PATH
 sudo sed -i "s|WorkingDirectory=.*|WorkingDirectory=$CURRENT_DIR|g" $SERVICE_PATH
 sudo sed -i "s|ExecStart=.*|ExecStart=$CURRENT_DIR/.venv/bin/python main.py --gui|g" $SERVICE_PATH
-sudo sed -i "s|User=.*|User=$USER|g" $SERVICE_PATH
+sudo sed -i "s|User=.*|User=$TARGET_USER|g" $SERVICE_PATH
+sudo sed -i "s|Environment=HOME=.*|Environment=HOME=/home/$TARGET_USER|g" $SERVICE_PATH
+sudo sed -i "s|/home/raspy/TA_ANO/tts-ano-ta|$CURRENT_DIR|g" $SERVICE_PATH
+sudo sed -i "s|raspy:raspy|$TARGET_USER:$TARGET_USER|g" $SERVICE_PATH
 
 sudo systemctl daemon-reload
 sudo systemctl enable reader.service

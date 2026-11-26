@@ -7,17 +7,244 @@ Mendukung pemutaran native via aplay (Raspberry Pi/Linux) serta fallback cross-p
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
 import time
 import wave
-from typing import Callable, Generator, List, Optional
+from typing import Callable, Dict, Generator, List, Optional
 
 try:
     from piper import PiperVoice
 except ImportError:
     PiperVoice = None
+
+
+_VOLUME_LOCK = threading.Lock()
+_ALSA_CTRL_CACHE: Dict[str, List[str]] = {}
+
+
+def _resolve_alsa_card(cfg_device: str) -> Optional[str]:
+    """Menentukan ID/nama card ALSA dari string device seperti 'plughw:2,0'."""
+    if not cfg_device:
+        return None
+    dev = cfg_device.strip()
+    if dev.lower() in ("default", "pulse", "pipewire", "sysdefault"):
+        return None
+    if ":" in dev:
+        part = dev.split(":", 1)[1].split(",", 1)[0].strip()
+        if part.upper().startswith("CARD="):
+            return part[5:].strip() or None
+        if part:
+            return part
+    return None
+
+
+def _list_sound_cards() -> List[str]:
+    """Membaca daftar indeks card audio dari /proc/asound/cards jika tersedia."""
+    cards: List[str] = []
+    if os.path.exists("/proc/asound/cards"):
+        try:
+            with open("/proc/asound/cards", "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    m = re.match(r"^\s*(\d+)\s+\[", line)
+                    if m:
+                        cards.append(m.group(1))
+        except Exception:
+            pass
+    return cards or ["0", "1", "2", "3"]
+
+
+def _get_card_controls(card: str) -> List[str]:
+    """Mengambil dan meng-cache daftar simple mixer control pada card ALSA."""
+    if card in _ALSA_CTRL_CACHE:
+        return _ALSA_CTRL_CACHE[card]
+    ctrls: List[str] = []
+    try:
+        res = subprocess.run(
+            ["amixer", "-c", str(card), "scontrols"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=1.0,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout:
+            ctrls = re.findall(r"Simple mixer control '([^']+)'", res.stdout)
+    except Exception:
+        pass
+    _ALSA_CTRL_CACHE[card] = ctrls
+    return ctrls
+
+
+def _set_amixer_control(card: str, ctrl: str, vol: int) -> bool:
+    """
+    Mengatur volume kontrol ALSA menggunakan kurva perseptual (-M / mapped volume)
+    dan memisahkan perintah unmute agar kontrol tanpa playback switch tetap berhasil.
+    """
+    for cmd in (
+        ["amixer", "-M", "-q", "-c", str(card), "sset", ctrl, f"{vol}%"],
+        ["amixer", "-q", "-c", str(card), "sset", ctrl, f"{vol}%"],
+    ):
+        try:
+            res = subprocess.run(
+                cmd,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=0.8,
+            )
+            if res.returncode == 0:
+                if vol > 0:
+                    try:
+                        subprocess.run(
+                            ["amixer", "-q", "-c", str(card), "sset", ctrl, "unmute"],
+                            check=False,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=0.5,
+                        )
+                    except Exception:
+                        pass
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _set_pipewire_or_pulse_volume(vol: int) -> bool:
+    """Mengatur volume sink default via wpctl (PipeWire) atau pactl (PulseAudio)."""
+    env = os.environ.copy()
+    if "XDG_RUNTIME_DIR" not in env and hasattr(os, "getuid"):
+        candidate = f"/run/user/{os.getuid()}"
+        if os.path.exists(candidate):
+            env["XDG_RUNTIME_DIR"] = candidate
+
+    applied = False
+    if shutil.which("wpctl"):
+        try:
+            res = subprocess.run(
+                ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{vol / 100.0:.2f}"],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=0.8,
+            )
+            if res.returncode == 0:
+                applied = True
+                if vol > 0:
+                    subprocess.run(
+                        ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"],
+                        check=False,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env=env,
+                        timeout=0.5,
+                    )
+        except Exception:
+            pass
+
+    if not applied and shutil.which("pactl"):
+        try:
+            res = subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{vol}%"],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=0.8,
+            )
+            if res.returncode == 0:
+                applied = True
+                if vol > 0:
+                    subprocess.run(
+                        ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"],
+                        check=False,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env=env,
+                        timeout=0.5,
+                    )
+        except Exception:
+            pass
+
+    return applied
+
+
+def apply_system_volume(vol_percent: int, app_instance=None) -> bool:
+    """
+    Mengatur volume sistem audio secara presisi tanpa atenuasi ganda:
+    - Di Linux dengan hardware mixer ALSA aktif pada device target:
+      gunakan `amixer -M` (kurva dB logaritmik agar 20%-100% terdengar proporsional)
+      dan biarkan PCM software di 100% agar suara TTS & audio cue tetap jernih dan seragam.
+    - Jika mixer hardware tidak tersedia (atau di non-Linux):
+      terapkan penskalaan volume PCM digital di Speaker.
+    """
+    vol = max(0, min(100, int(vol_percent)))
+
+    if platform.system() != "Linux":
+        if app_instance and hasattr(app_instance, "speaker") and app_instance.speaker:
+            try:
+                app_instance.speaker.set_volume(vol)
+            except Exception:
+                pass
+        return True
+
+    cfg_device = "plughw:2,0"
+    mixer_name = "Headphone"
+    if app_instance and hasattr(app_instance, "cfg") and isinstance(getattr(app_instance, "cfg", None), dict):
+        audio_cfg = app_instance.cfg.get("audio", {})
+        cfg_device = audio_cfg.get("device", cfg_device)
+        mixer_name = audio_cfg.get("mixer", mixer_name)
+    elif app_instance and hasattr(app_instance, "speaker") and getattr(app_instance.speaker, "device", None):
+        cfg_device = app_instance.speaker.device
+
+    primary_card = _resolve_alsa_card(cfg_device)
+    preferred_names = list(
+        dict.fromkeys([mixer_name, "Headphone", "Headphones", "PCM", "Master", "Speaker", "Playback", "Digital"])
+    )
+
+    hw_applied = False
+    with _VOLUME_LOCK:
+        if primary_card is not None and shutil.which("amixer"):
+            card_ctrls = _get_card_controls(primary_card)
+            targets = [c for c in preferred_names if c in card_ctrls] if card_ctrls else preferred_names[:4]
+            for ctrl in targets:
+                if _set_amixer_control(primary_card, ctrl, vol):
+                    hw_applied = True
+
+        if not hw_applied:
+            pw_ok = _set_pipewire_or_pulse_volume(vol)
+            if primary_card is None and pw_ok:
+                hw_applied = True
+            elif shutil.which("amixer"):
+                for card in _list_sound_cards():
+                    if str(card) == str(primary_card):
+                        continue
+                    card_ctrls = _get_card_controls(card)
+                    targets = [c for c in preferred_names if c in card_ctrls]
+                    for ctrl in targets:
+                        if _set_amixer_control(card, ctrl, vol):
+                            hw_applied = True
+                if not hw_applied and pw_ok:
+                    hw_applied = True
+
+    if app_instance and hasattr(app_instance, "speaker") and app_instance.speaker:
+        try:
+            # Hindari atenuasi ganda jika hardware mixer pada device target sudah aktif
+            app_instance.speaker.set_volume(100 if hw_applied else vol)
+        except Exception:
+            pass
+
+    return hw_applied
 
 
 class Speaker:
@@ -125,13 +352,59 @@ class Speaker:
                 return
 
             if self.has_aplay:
+                if self.volume < 0.995:
+                    try:
+                        with wave.open(path, 'rb') as wf:
+                            if wf.getsampwidth() == 2 and wf.getcomptype() == 'NONE':
+                                nch = wf.getnchannels()
+                                fr = wf.getframerate()
+                                raw_frames = wf.readframes(wf.getnframes())
+                                scaled_frames = self._scale_pcm(raw_frames)
+                                proc = subprocess.Popen(
+                                    [
+                                        'aplay', '-q', '-D', self.device,
+                                        '-t', 'raw', '-f', 'S16_LE',
+                                        '-c', str(nch), '-r', str(fr), '-'
+                                    ],
+                                    stdin=subprocess.PIPE,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL
+                                )
+                                self._cue = proc
+                                if wait:
+                                    try:
+                                        proc.communicate(input=scaled_frames, timeout=4.0)
+                                    except subprocess.TimeoutExpired:
+                                        proc.kill()
+                                    except Exception:
+                                        pass
+                                else:
+                                    def _feed_cue(p=proc, data=scaled_frames):
+                                        try:
+                                            if p.stdin:
+                                                p.stdin.write(data)
+                                                p.stdin.close()
+                                        except Exception:
+                                            pass
+                                    threading.Thread(target=_feed_cue, daemon=True).start()
+                                return
+                    except Exception:
+                        pass
+
                 self._cue = subprocess.Popen(
                     ['aplay', '-q', '-D', self.device, path],
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
                 if wait and self._cue:
-                    self._cue.wait()
+                    try:
+                        self._cue.wait(timeout=4.0)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            self._cue.kill()
+                        except Exception:
+                            pass
             else:
                 # Fallback untuk Windows/macOS/environment tanpa aplay
                 self._play_wav_fallback(path, wait=wait)

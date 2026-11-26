@@ -10,6 +10,7 @@ Karakteristik Desain:
 """
 
 import os
+import subprocess
 import sys
 import time
 import threading
@@ -62,7 +63,7 @@ except ImportError:
     WiFiManager = None
 
 try:
-    from main import apply_system_volume
+    from speech import apply_system_volume
 except ImportError:
     apply_system_volume = None
 
@@ -209,10 +210,12 @@ class LinuxTouchReader:
                             self.is_pixel_coords = True
                         else:
                             print(f"[GUI Touch] Hardware range dari driver: X=[{abs_x.min}~{abs_x.max}], Y=[{abs_y.min}~{abs_y.max}]", flush=True)
-                            if self.min_adc_x == 200 and self.max_adc_x == 3900:
+                            # Pertahankan kalibrasi aktif dari config.toml (mis. 200~3900);
+                            # hanya gunakan range driver jika config belum valid atau driver punya range kustom bukan raw 12-bit (0~4095)
+                            if self.min_adc_x >= self.max_adc_x or (abs_x.max not in (4095, 4096) and self.min_adc_x == 200 and self.max_adc_x == 3900):
                                 self.min_adc_x = abs_x.min
                                 self.max_adc_x = abs_x.max
-                            if self.min_adc_y == 200 and self.max_adc_y == 3900:
+                            if self.min_adc_y >= self.max_adc_y or (abs_y.max not in (4095, 4096) and self.min_adc_y == 200 and self.max_adc_y == 3900):
                                 self.min_adc_y = abs_y.min
                                 self.max_adc_y = abs_y.max
             except Exception as err:
@@ -275,16 +278,7 @@ class LinuxTouchReader:
             nx = max(0.0, min(1.0, self.raw_x / float(self.width)))
             ny = max(0.0, min(1.0, self.raw_y / float(self.height)))
         else:
-            # Auto-adaptasi batas jika sinyal ADC melewati ambang batas
-            if self.raw_x < self.min_adc_x:
-                self.min_adc_x = self.raw_x
-            if self.raw_x > self.max_adc_x:
-                self.max_adc_x = self.raw_x
-            if self.raw_y < self.min_adc_y:
-                self.min_adc_y = self.raw_y
-            if self.raw_y > self.max_adc_y:
-                self.max_adc_y = self.raw_y
-
+            # Gunakan rentang ADC terkalibrasi dan clamp ke [0.0, 1.0] agar spike noise tidak merusak skala
             span_x = max(1, self.max_adc_x - self.min_adc_x)
             span_y = max(1, self.max_adc_y - self.min_adc_y)
             nx = max(0.0, min(1.0, (self.raw_x - self.min_adc_x) / float(span_x)))
@@ -305,7 +299,7 @@ class LinuxTouchReader:
         if not HAS_PYGAME:
             return
         now = time.time()
-        if now - self.last_click_ts < 0.22:
+        if now - self.last_click_ts < 0.16:
             return
         self.last_click_ts = now
         print(f"[GUI Input] Klik/Sentuh terkirim ke Pygame: ({px}, {py}) [RAW ADC: x={self.raw_x}, y={self.raw_y}]")
@@ -316,9 +310,8 @@ class LinuxTouchReader:
         """
         Loop baca event sentuh dari evdev.
         Strategi: Kumpulkan koordinat X/Y selama jari menekan.
-        Kirim klik (post event) HANYA saat jari DIANGKAT (BTN_TOUCH=0 atau ABS_PRESSURE=0).
-        Ini mencegah klik ganda saat jari masih di layar dan memastikan
-        koordinat yang dikirim adalah posisi AKHIR sebelum diangkat.
+        Kirim klik (post event) pada SYN_REPORT saat jari DIANGKAT (BTN_TOUCH=0 atau ABS_PRESSURE=0)
+        agar pasangan koordinat X dan Y selalu atomik dalam paket event yang sama.
         Fallback: EV_SYN hanya dipakai jika device tidak mengirim BTN_TOUCH/PRESSURE.
         """
         try:
@@ -341,6 +334,8 @@ class LinuxTouchReader:
 
             last_syn_x = None
             last_syn_y = None
+            pending_release = False
+            release_reason = ""
 
             for event in self.device.read_loop():
                 if not self.running:
@@ -355,31 +350,33 @@ class LinuxTouchReader:
                     elif event.code == getattr(evdev.ecodes, 'ABS_PRESSURE', 24):
                         was_down = self.is_touch_down
                         self.is_touch_down = (event.value > 0)
-                        # Jari baru diangkat (pressure=0): kirim klik dengan koordinat terakhir
                         if was_down and not self.is_touch_down:
-                            if self.raw_x is not None and self.raw_y is not None:
-                                px, py = self._calc_screen_coords()
-                                print(f"[GUI Touch] Release (pressure=0): raw=({self.raw_x},{self.raw_y}) -> px=({px},{py})", flush=True)
-                                self._post_click(px, py)
+                            pending_release = True
+                            release_reason = "pressure=0"
 
-                # Jari diangkat (BTN_TOUCH=0): kirim klik dengan koordinat terakhir
+                # Jari diangkat (BTN_TOUCH=0): tandai rilis untuk dieksekusi saat SYN_REPORT
                 elif event.type == evdev.ecodes.EV_KEY:
                     if event.code in (evdev.ecodes.BTN_TOUCH, evdev.ecodes.BTN_LEFT):
                         if event.value == 1:
                             self.is_touch_down = True
-                            last_syn_x = None  # Reset koordinat sinkronisasi
+                            pending_release = False
+                            last_syn_x = None
                             last_syn_y = None
                         elif event.value == 0:
                             self.is_touch_down = False
-                            if self.raw_x is not None and self.raw_y is not None:
-                                px, py = self._calc_screen_coords()
-                                print(f"[GUI Touch] Release (BTN_TOUCH=0): raw=({self.raw_x},{self.raw_y}) -> px=({px},{py})", flush=True)
-                                self._post_click(px, py)
+                            pending_release = True
+                            release_reason = "BTN_TOUCH=0"
 
-                # EV_SYN: Fallback jika device tidak punya BTN_TOUCH/PRESSURE
+                # EV_SYN: Eksekusi klik atomik setelah semua sumbu X/Y pada paket event terbaca
                 elif event.type == evdev.ecodes.EV_SYN:
                     if event.code == getattr(evdev.ecodes, 'SYN_REPORT', 0):
-                        if use_syn_fallback:
+                        if pending_release:
+                            pending_release = False
+                            if self.raw_x is not None and self.raw_y is not None:
+                                px, py = self._calc_screen_coords()
+                                print(f"[GUI Touch] Release ({release_reason}): raw=({self.raw_x},{self.raw_y}) -> px=({px},{py})", flush=True)
+                                self._post_click(px, py)
+                        elif use_syn_fallback:
                             # Mode fallback: kirim tiap perubahan koordinat (pakai cooldown)
                             if self.raw_x is not None and self.raw_y is not None:
                                 if self.raw_x != last_syn_x or self.raw_y != last_syn_y:
@@ -467,6 +464,10 @@ class TFTGuiPygame:
 
         # Kontrol Dialog Daya & Animasi Sentuh
         self.show_power_dialog = False
+        self._shutting_down = False
+        self._status_override_until = 0.0
+        self._vol_lock = threading.Lock()
+        self._vol_seq = 0
         self.pressed_button = None
         self.pressed_until = 0.0
         self._last_temp_check = 0.0
@@ -549,13 +550,13 @@ class TFTGuiPygame:
         self.modal_buttons = {
             "shutdown": {
                 "rect": rect_factory(45, 75, 230, 42),
-                "label": "⏻ MATIKAN TOTAL (OFF)",
+                "label": "[OFF] MATIKAN TOTAL",
                 "color": self.C_DANGER,
                 "action": self._confirm_shutdown
             },
             "cancel": {
                 "rect": rect_factory(45, 126, 230, 36),
-                "label": "✖ BATAL / KEMBALI",
+                "label": "[X] BATAL / KEMBALI",
                 "color": (71, 85, 105),
                 "action": self._cancel_dialog
             }
@@ -602,12 +603,18 @@ class TFTGuiPygame:
             target_fb = ""
 
         # --- Inisialisasi SDL ---
-        # SDL2 tidak mendukung fbcon. Urutan percobaan: kmsdrm → dummy → memory surface
-        sdl_drivers_to_try = []
-        # Coba kmsdrm hanya jika ada /dev/dri (DRM) dan tidak via SSH
-        if os.path.exists("/dev/dri") and "SSH_CLIENT" not in os.environ:
-            sdl_drivers_to_try.append("kmsdrm")
-        sdl_drivers_to_try.append("dummy")
+        # SDL2 tidak mendukung fbcon. Hormati video_driver dari config.toml (default: dummy + FramebufferBlitter)
+        gui_cfg = self.app.cfg.get('gui', {}) if hasattr(self.app, 'cfg') and isinstance(self.app.cfg, dict) else {}
+        pref_driver = str(gui_cfg.get('video_driver', '')).strip().lower()
+        if sys.platform.startswith("linux"):
+            if pref_driver in ("", "dummy") or target_fb:
+                sdl_drivers_to_try = ["dummy"]
+                if os.path.exists("/dev/dri") and "SSH_CLIENT" not in os.environ and pref_driver == "kmsdrm":
+                    sdl_drivers_to_try.insert(0, "kmsdrm")
+            else:
+                sdl_drivers_to_try = [pref_driver, "dummy"]
+        else:
+            sdl_drivers_to_try = [None, "dummy"]
 
         if os.path.exists("/dev/input/touchscreen"):
             os.environ.setdefault("SDL_MOUSEDRV", "TSLIB")
@@ -624,7 +631,8 @@ class TFTGuiPygame:
         used_driver = "memory"
         for v_driver in sdl_drivers_to_try:
             try:
-                os.environ["SDL_VIDEODRIVER"] = v_driver
+                if v_driver is not None:
+                    os.environ["SDL_VIDEODRIVER"] = v_driver
                 try:
                     pygame.display.quit()
                 except Exception:
@@ -632,8 +640,8 @@ class TFTGuiPygame:
                 pygame.display.init()
                 use_flags = flags if v_driver == "kmsdrm" else 0
                 screen = pygame.display.set_mode((self.width, self.height), use_flags)
-                used_driver = v_driver
-                print(f"[GUI Init] SDL driver '{v_driver}' berhasil digunakan.", flush=True)
+                used_driver = v_driver or "default"
+                print(f"[GUI Init] SDL driver '{used_driver}' berhasil digunakan.", flush=True)
                 break
             except Exception as e:
                 print(f"[GUI Init] SDL driver '{v_driver}' gagal: {e}", flush=True)
@@ -673,23 +681,24 @@ class TFTGuiPygame:
 
         # --- Touch Reader ---
         t_cfg = self._get_touch_config()
-        swap_xy    = bool(t_cfg.get('swap_xy',   False))
-        inv_x      = bool(t_cfg.get('invert_x',  False))
-        inv_y      = bool(t_cfg.get('invert_y',  False))
-        dev_path_touch = str(t_cfg.get('device', ''))
-        min_adc_x  = int(t_cfg.get('min_adc_x',  200))
-        max_adc_x  = int(t_cfg.get('max_adc_x', 3900))
-        min_adc_y  = int(t_cfg.get('min_adc_y',  200))
-        max_adc_y  = int(t_cfg.get('max_adc_y', 3900))
+        if bool(t_cfg.get('enabled', True)):
+            swap_xy    = bool(t_cfg.get('swap_xy',   False))
+            inv_x      = bool(t_cfg.get('invert_x',  False))
+            inv_y      = bool(t_cfg.get('invert_y',  False))
+            dev_path_touch = str(t_cfg.get('device', ''))
+            min_adc_x  = int(t_cfg.get('min_adc_x',  200))
+            max_adc_x  = int(t_cfg.get('max_adc_x', 3900))
+            min_adc_y  = int(t_cfg.get('min_adc_y',  200))
+            max_adc_y  = int(t_cfg.get('max_adc_y', 3900))
 
-        self.touch_reader = LinuxTouchReader(
-            width=self.width, height=self.height,
-            swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
-            device_path=dev_path_touch,
-            min_adc_x=min_adc_x, max_adc_x=max_adc_x,
-            min_adc_y=min_adc_y, max_adc_y=max_adc_y,
-        )
-        self.touch_reader.start()
+            self.touch_reader = LinuxTouchReader(
+                width=self.width, height=self.height,
+                swap_xy=swap_xy, invert_x=inv_x, invert_y=inv_y,
+                device_path=dev_path_touch,
+                min_adc_x=min_adc_x, max_adc_x=max_adc_x,
+                min_adc_y=min_adc_y, max_adc_y=max_adc_y,
+            )
+            self.touch_reader.start()
 
         # Muat font sistem yang bersih
         self.font_title = pygame.font.SysFont("dejavusans,arial,helvetica", 12, bold=True)
@@ -726,33 +735,40 @@ class TFTGuiPygame:
         self.status_msg = "SUARA DISTOP"
         self.status_color = self.C_TEXT_MUTED
 
+    def _set_status_override(self, msg: str, color, duration: float = 1.8):
+        self.status_msg = msg
+        self.status_color = color
+        self._status_override_until = time.time() + duration
+
+    def _dispatch_volume_update(self, vol_percent: int):
+        self._vol_seq += 1
+        seq = self._vol_seq
+        threading.Thread(target=self._apply_volume_hardware, args=(vol_percent, seq), daemon=True).start()
+
     def _action_vol_down(self):
-        print("[GUI Action] Tombol VOL - dipicu.")
-        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+        print("[GUI Action] Tombol VOL - dipicu.", flush=True)
+        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps') and self.app.volume_steps:
             self.app.current_vol_idx = max(0, self.app.current_vol_idx - 1)
             new_vol = self.app.volume_steps[self.app.current_vol_idx]
-            self.status_msg = f"VOL: {new_vol}%"
-            self.status_color = self.C_ACCENT
-            threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+            self._set_status_override(f"VOL: {new_vol}%", self.C_ACCENT, 1.8)
+            self._dispatch_volume_update(new_vol)
 
     def _action_vol_up(self):
-        print("[GUI Action] Tombol VOL + dipicu.")
-        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+        print("[GUI Action] Tombol VOL + dipicu.", flush=True)
+        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps') and self.app.volume_steps:
             self.app.current_vol_idx = min(len(self.app.volume_steps) - 1, self.app.current_vol_idx + 1)
             new_vol = self.app.volume_steps[self.app.current_vol_idx]
-            self.status_msg = f"VOL: {new_vol}%"
-            self.status_color = self.C_ACCENT
-            threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+            self._set_status_override(f"VOL: {new_vol}%", self.C_ACCENT, 1.8)
+            self._dispatch_volume_update(new_vol)
 
     def _action_vol(self):
         """Siklus volume (kompatibilitas tombol fisik / tes unit)."""
-        print("[GUI Action] Tombol VOL dipicu.")
-        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+        print("[GUI Action] Tombol VOL dipicu.", flush=True)
+        if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps') and self.app.volume_steps:
             self.app.current_vol_idx = (self.app.current_vol_idx + 1) % len(self.app.volume_steps)
             new_vol = self.app.volume_steps[self.app.current_vol_idx]
-            self.status_msg = f"VOL: {new_vol}%"
-            self.status_color = self.C_ACCENT
-            threading.Thread(target=self._apply_volume_hardware, args=(new_vol,), daemon=True).start()
+            self._set_status_override(f"VOL: {new_vol}%", self.C_ACCENT, 1.8)
+            self._dispatch_volume_update(new_vol)
         elif hasattr(self.app, '_run_async') and hasattr(self.app, 'cycle_volume'):
             self.app._run_async(self.app.cycle_volume)
 
@@ -762,43 +778,49 @@ class TFTGuiPygame:
         if not self.wifi_mgr:
             return
         new_state = self.wifi_mgr.toggle_wifi()
-        self.status_msg = "WIFI AKTIF" if new_state else "WIFI MATI"
-        self.status_color = self.C_PRIMARY if new_state else self.C_DANGER
-        try:
-            self.app.cue('klik')
-        except Exception:
-            pass
+        self._set_status_override("WIFI AKTIF" if new_state else "WIFI MATI", self.C_PRIMARY if new_state else self.C_DANGER, 2.0)
+        if not getattr(getattr(self.app, 'speaker', None), 'playing', False):
+            try:
+                self.app.cue('klik')
+            except Exception:
+                pass
 
-    def _apply_volume_hardware(self, vol_percent: int):
-        if apply_system_volume is not None:
-            apply_system_volume(vol_percent, self.app)
-        else:
-            if hasattr(self.app, 'speaker') and self.app.speaker:
+    def _apply_volume_hardware(self, vol_percent: int, seq: Optional[int] = None):
+        with self._vol_lock:
+            if seq is not None and seq != self._vol_seq:
+                return
+            if apply_system_volume is not None:
+                apply_system_volume(vol_percent, self.app)
+            else:
+                if hasattr(self.app, 'speaker') and self.app.speaker:
+                    try:
+                        self.app.speaker.set_volume(vol_percent)
+                    except Exception:
+                        pass
+                if sys.platform.startswith("linux"):
+                    try:
+                        subprocess.run(
+                            ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol_percent}%"],
+                            check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
+                        )
+                    except Exception:
+                        pass
+                    for card in ['0', '1', '2', '3']:
+                        for ctrl in ['Headphone', 'Headphones', 'Master', 'PCM', 'Speaker']:
+                            try:
+                                subprocess.run(
+                                    ['amixer', '-M', '-q', '-c', card, 'sset', ctrl, f"{vol_percent}%"],
+                                    check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
+                                )
+                            except Exception:
+                                pass
+            if seq is not None and seq != self._vol_seq:
+                return
+            if not getattr(getattr(self.app, 'speaker', None), 'playing', False):
                 try:
-                    self.app.speaker.set_volume(vol_percent)
+                    self.app.cue('klik')
                 except Exception:
                     pass
-            if sys.platform.startswith("linux"):
-                try:
-                    subprocess.run(
-                        ['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f"{vol_percent}%"],
-                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.8
-                    )
-                except Exception:
-                    pass
-                for card in ['0', '1', '2', '3']:
-                    for ctrl in ['Master', 'Headphone', 'PCM', 'Speaker']:
-                        try:
-                            subprocess.run(
-                                ['amixer', '-c', card, 'sset', ctrl, f"{vol_percent}%"],
-                                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
-                            )
-                        except Exception:
-                            pass
-        try:
-            self.app.cue('klik')
-        except Exception:
-            pass
 
     def _action_shutdown(self):
         """Tombol OFF: Tampilkan dialog konfirmasi sebelum shutdown total."""
@@ -809,7 +831,7 @@ class TFTGuiPygame:
         """Dikonfirmasi oleh user -> langsung shutdown total seketika."""
         print("[GUI Action] Shutdown dikonfirmasi -> Mematikan sistem.", flush=True)
         self.show_power_dialog = False
-        self.running = False  # Hentikan loop GUI seketika
+        self._shutting_down = True
 
         # Hentikan audio jika sedang aktif
         if hasattr(self.app, 'speaker') and self.app.speaker:
@@ -822,7 +844,7 @@ class TFTGuiPygame:
         if hasattr(self.app, 'busy'):
             self.app.busy = False
 
-        # Tampilkan layar hitam langsung
+        # Tampilkan layar pesan shutdown langsung ke LCD sebelum poweroff
         if self.screen:
             self.screen.fill((0, 0, 0))
             if hasattr(self, 'font_title') and self.font_title:
@@ -836,7 +858,26 @@ class TFTGuiPygame:
                 pass
 
         # Jalankan shutdown di thread independen (jangan melalui _run_async yang bisa terblokir busy)
-        threading.Thread(target=self.app.safe_shutdown, daemon=False).start()
+        threading.Thread(target=self._execute_shutdown, daemon=False).start()
+
+    def _execute_shutdown(self):
+        ok = True
+        try:
+            res = self.app.safe_shutdown()
+            if res is False:
+                ok = False
+        except Exception as e:
+            print(f"[GUI Error] Gagal menjalankan safe_shutdown: {e}", flush=True)
+            ok = False
+
+        if not ok:
+            # Jangan keluar dari GUI jika perintah poweroff ditolak (mencegah systemd Restart=always me-restart aplikasi)
+            self._shutting_down = False
+            self._set_status_override("OFF GAGAL (IZIN)", self.C_DANGER, 4.0)
+        else:
+            if sys.platform.startswith("linux"):
+                time.sleep(2.5)
+            self.running = False
 
     def _confirm_exit_gui(self):
         """Keluar dari GUI dan kembali ke menu terminal."""
@@ -945,7 +986,10 @@ class TFTGuiPygame:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                    break
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
+                    if self._shutting_down:
+                        continue
                     if event.type == pygame.MOUSEBUTTONDOWN:
                         pos = event.pos
                     else:
@@ -959,6 +1003,8 @@ class TFTGuiPygame:
                         if 70 <= py <= 120 and 40 <= px <= 280:
                             print("[GUI Event] Klik Modal -> MATIKAN TOTAL")
                             self._confirm_shutdown()
+                            if self._shutting_down:
+                                break
                         elif 122 <= py <= 168 and 40 <= px <= 280:
                             print("[GUI Event] Klik Modal -> BATAL")
                             self._cancel_dialog()
@@ -967,6 +1013,8 @@ class TFTGuiPygame:
                                 if btn["rect"].collidepoint(pos):
                                     btn["action"]()
                                     break
+                            if self._shutting_down:
+                                break
                     else:
                         # Cek setiap tombol utama di baris bawah dengan zona sentuh ramah jari (mencakup hingga tepi bawah y=240)
                         handled = False
@@ -994,11 +1042,15 @@ class TFTGuiPygame:
                         if not handled:
                             print(f"[GUI Event] Sentuhan di ({px}, {py}) berada di luar area tombol.")
                 elif event.type == pygame.KEYDOWN:
+                    if self._shutting_down:
+                        continue
                     if self.show_power_dialog:
                         if event.key in (pygame.K_ESCAPE, pygame.K_b):
                             self._cancel_dialog()
                         elif event.key == pygame.K_RETURN:
                             self._confirm_shutdown()
+                            if self._shutting_down:
+                                break
                         elif event.key == pygame.K_q:
                             self._confirm_exit_gui()
                     else:
@@ -1017,9 +1069,19 @@ class TFTGuiPygame:
                         elif event.key in (pygame.K_ESCAPE, pygame.K_q):
                             self.show_power_dialog = True
 
+            if not self.running:
+                break
+
+            if self._shutting_down:
+                # Pertahankan layar "SISTEM DIMATIKAN TOTAL..." tanpa menimpanya dengan render GUI normal
+                self.clock.tick(10)
+                continue
+
             # 2. Sinkronisasi Status Mesin App & Indikator Kamera
             cam_alive = (self.app.cap is not None and self.app.cap.isOpened())
-            if self.app.busy:
+            if time.time() < self._status_override_until and not self.show_power_dialog:
+                pass  # Pertahankan pesan status sementara (mis. VOL: 80%, WIFI, atau galat)
+            elif self.app.busy:
                 if self.app.speaker.playing:
                     self.status_msg = "MEMBACA..."
                     self.status_color = self.C_INFO
@@ -1027,9 +1089,7 @@ class TFTGuiPygame:
                     self.status_msg = "MEMPROSES..."
                     self.status_color = self.C_WARNING
             elif not self.show_power_dialog:
-                if self.status_msg.startswith("VOL:"):
-                    pass  # Biarkan pesan volume tampil sesaat
-                elif not cam_alive:
+                if not cam_alive:
                     self.status_msg = "CAM OFFLINE"
                     self.status_color = self.C_DANGER
                 else:
@@ -1392,17 +1452,66 @@ class TFTGuiTkinter:
                              command=self.app.speaker.stop, height=2, width=5)
         btn_stop.pack(side="left", padx=2)
 
+        status_override_until = 0.0
+        vol_lock = threading.Lock()
+        vol_seq = [0]
+
+        def _tk_apply_vol(nv: int, seq: int):
+            with vol_lock:
+                if seq != vol_seq[0]:
+                    return
+                if apply_system_volume is not None:
+                    apply_system_volume(nv, self.app)
+                elif hasattr(self.app, 'speaker') and self.app.speaker:
+                    try:
+                        self.app.speaker.set_volume(nv)
+                    except Exception:
+                        pass
+                if not getattr(getattr(self.app, 'speaker', None), 'playing', False):
+                    try:
+                        self.app.cue('klik')
+                    except Exception:
+                        pass
+
         def tk_vol_down():
-            if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+            nonlocal status_override_until
+            if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps') and self.app.volume_steps:
                 self.app.current_vol_idx = max(0, self.app.current_vol_idx - 1)
                 nv = self.app.volume_steps[self.app.current_vol_idx]
+                status_override_until = time.time() + 1.8
                 self.lbl_status.config(text=f"VOL: {nv}%", fg="#0ea5e9")
+                vol_seq[0] += 1
+                threading.Thread(target=_tk_apply_vol, args=(nv, vol_seq[0]), daemon=True).start()
 
         def tk_vol_up():
-            if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps'):
+            nonlocal status_override_until
+            if hasattr(self.app, 'current_vol_idx') and hasattr(self.app, 'volume_steps') and self.app.volume_steps:
                 self.app.current_vol_idx = min(len(self.app.volume_steps) - 1, self.app.current_vol_idx + 1)
                 nv = self.app.volume_steps[self.app.current_vol_idx]
+                status_override_until = time.time() + 1.8
                 self.lbl_status.config(text=f"VOL: {nv}%", fg="#0ea5e9")
+                vol_seq[0] += 1
+                threading.Thread(target=_tk_apply_vol, args=(nv, vol_seq[0]), daemon=True).start()
+
+        def tk_off():
+            nonlocal status_override_until
+            status_override_until = time.time() + 5.0
+            self.lbl_status.config(text="MEMATIKAN...", fg="#ef4444")
+            def _do_off():
+                nonlocal status_override_until
+                ok = self.app.safe_shutdown()
+                if ok is False:
+                    status_override_until = time.time() + 4.0
+                    try:
+                        self.root.after(0, lambda: self.lbl_status.config(text="OFF GAGAL (IZIN)", fg="#ef4444"))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self.root.after(0, self.root.destroy)
+                    except Exception:
+                        pass
+            threading.Thread(target=_do_off, daemon=False).start()
 
         btn_vol_dn = tk.Button(btn_box, text="🔉 -", bg="#0ea5e9", fg="white", font=("Helvetica", 9, "bold"),
                                relief="raised", bd=2,
@@ -1414,17 +1523,18 @@ class TFTGuiTkinter:
                                command=tk_vol_up, height=2, width=4)
         btn_vol_up.pack(side="left", padx=2)
 
-        btn_off = tk.Button(btn_box, text="⏻ OFF", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"),
+        btn_off = tk.Button(btn_box, text="OFF", bg="#dc2626", fg="white", font=("Helvetica", 9, "bold"),
                             relief="raised", bd=2,
-                            command=self.app.safe_shutdown, height=2, width=4)
+                            command=tk_off, height=2, width=4)
         btn_off.pack(side="left", padx=2)
 
         # Timer pemantau status
         def sync_loop():
-            if self.app.busy:
-                self.lbl_status.config(text="MEMPROSES..." if not self.app.speaker.playing else "MEMBACA...", fg="#f59e0b")
-            else:
-                self.lbl_status.config(text="ALAT SIAP", fg="#10b981")
+            if time.time() >= status_override_until:
+                if self.app.busy:
+                    self.lbl_status.config(text="MEMPROSES..." if not self.app.speaker.playing else "MEMBACA...", fg="#f59e0b")
+                else:
+                    self.lbl_status.config(text="ALAT SIAP", fg="#10b981")
 
             if self.app.last_reading:
                 t = " ".join(self.app.last_reading)
